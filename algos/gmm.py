@@ -97,7 +97,11 @@ class GMMFitter:
         gmm_list = []
         for _ in range(num_iter):
             gmm_list.append(GMM(weights, means, covariances))
-            weights, means, covariances = self._compute_next_params(weights, means, covariances)
+            weights, means, covariances = self._compute_next_params(
+                data,
+                weights, 
+                means, 
+                covariances)
         
         return gmm_list
     
@@ -117,15 +121,51 @@ class GMMFitter:
             rand_cov,
         )
     
-    def _compute_next_params(self, curr_weights: np.ndarray, curr_means: np.ndarray, curr_covariances: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def _compute_next_params(self, 
+                             data: np.ndarray, 
+                             curr_weights: np.ndarray, 
+                             curr_means: np.ndarray, 
+                             curr_covariances: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Compute the next set of parameters for the GMM using the EM algorithm
 
+        :param data: observation data
         :param curr_weights: Current weights of the GMM components
         :param curr_means: Current means of the GMM components
         :param curr_covariances: Current covariances of the GMM components
         :return: Tuple of weights, means, covariances
         """
 
-        # TODO implement
-        return curr_weights, curr_means, curr_covariances
+        # compute joint probabilities of the data and latent mixture index given the current distribution parameters
+        # normalization factors - shape (n_clusters,), one for each cluster
+        normalization_factors = 1 / ((2 * np.pi)**(self._n_features / 2) * np.sqrt(np.linalg.det(curr_covariances)))
+
+        # broadcast subtraction of data minus means
+        data_minus_means = data[:, np.newaxis, :] - curr_means[np.newaxis, :, :]  # shape (n_samples, n_clusters, n_features)
+
+        # expand dimensions accordingly to compute the exponent term
+        data_minus_means_expanded = data_minus_means[:, :, :, np.newaxis]
+        # compute exponent term
+        exponent = -0.5 * data_minus_means_expanded.transpose(0, 1, 3, 2) @ np.linalg.inv(curr_covariances[np.newaxis, :, :, :]) @ data_minus_means_expanded
+        exponent = exponent.squeeze()  # shape (n_samples, n_clusters)
+        joint_data_latent_probabilities = normalization_factors * np.exp(exponent) * curr_weights  # shape (n_samples, n_clusters)
+
+        # marginalize across the latent to get probability of data given the current distribution parameters
+        data_probabilities = np.sum(joint_data_latent_probabilities, axis=1)
+        # compute data probabilities conditioned on latent
+        data_probabilities_conditioned_on_latent = joint_data_latent_probabilities / data_probabilities[:, np.newaxis]
+
+        # compute the new weights
+        assignment_sum = np.sum(data_probabilities_conditioned_on_latent, axis=0)
+        optimal_weights = assignment_sum / np.sum(assignment_sum)  # shape (n_clusters,)
+
+        # compute the new means
+        optimal_means = data_probabilities_conditioned_on_latent.T @ data
+        optimal_means = optimal_means / assignment_sum[:, np.newaxis]  # shape (n_clusters, n_features)
+
+        # compute the new covariances
+        outer_product = data_minus_means.transpose(0, 2, 1) @ data_minus_means  # shape (n_samples, n_features, n_features)
+        weighted_products = data_probabilities_conditioned_on_latent[:, :, np.newaxis, np.newaxis] * outer_product[:, np.newaxis, :, :]  # shape (n_samples, n_clusters, n_features, n_features)
+        optimal_covs = np.sum(weighted_products, axis=0) / assignment_sum[:, np.newaxis, np.newaxis]  # shape (n_clusters, n_features, n_features)
+
+        return optimal_weights, optimal_means, optimal_covs
