@@ -1,5 +1,5 @@
 import numpy as np
-from typing import List
+from typing import List, Tuple
 from dataclasses import dataclass
 
 
@@ -77,8 +77,8 @@ class GMMFitter:
         :parma n_features: Number of features in the data
         """
 
-        self.n_clusters = n_clusters
-        self.n_features = n_features
+        self._n_clusters = n_clusters
+        self._n_features = n_features
 
     def fit(self, data: np.ndarray, num_iter=20) -> List[GMM]:
         """
@@ -90,13 +90,42 @@ class GMMFitter:
         :return: List of GMM objects, one for each iteration
         """
 
-        # TODO implement
-        rand_cov = np.random.rand(self.n_clusters, self.n_features, self.n_features)
+        # initialize the parameters
+        weights, means, covariances = self._initialize_parameters()
+
+        # iterate through the EM algorithm
+        gmm_list = []
+        for _ in range(num_iter):
+            gmm_list.append(GMM(weights, means, covariances))
+            weights, means, covariances = self._compute_next_params(weights, means, covariances)
+        
+        return gmm_list
+    
+    def _initialize_parameters(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Initialize the parameters of the GMM (naively for now)
+
+        :return: Tuple of weights, means, covariances
+        """
+
+        # make sure the covariance matrices are positive definite
+        rand_cov = np.random.rand(self._n_clusters, self._n_features, self._n_features)
         rand_cov = rand_cov @ rand_cov.transpose(0, 2, 1)
-        return [
-            GMM(
-                weights=np.random.rand(self.n_clusters,),
-                means=np.random.rand(self.n_clusters, self.n_features),
-                covariances=rand_cov,
-            )
-        ] * num_iter
+        return (
+            np.random.rand(self._n_clusters,),
+            np.random.rand(self._n_clusters, self._n_features),
+            rand_cov,
+        )
+    
+    def _compute_next_params(self, curr_weights: np.ndarray, curr_means: np.ndarray, curr_covariances: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Compute the next set of parameters for the GMM using the EM algorithm
+
+        :param curr_weights: Current weights of the GMM components
+        :param curr_means: Current means of the GMM components
+        :param curr_covariances: Current covariances of the GMM components
+        :return: Tuple of weights, means, covariances
+        """
+
+        # TODO implement
+        return curr_weights, curr_means, curr_covariances
