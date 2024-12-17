@@ -1,11 +1,22 @@
 import numpy as np
 from typing import List
+from dataclasses import dataclass
+
+
+@dataclass
+class CachedComputeParams:
+    """
+    Cached params to expedite the computation of the GMM PDF on multiple data points
+    """
+
+    normalization_factor: float
+    inv_cov: np.ndarray
 
 
 class GMM:
     """
     The GMM class holds a Gaussian Mixture Model and supports computing the PDF
-    """
+    """ 
 
     def __init__(self, weights: np.ndarray, means: np.ndarray, covariances: np.ndarray) -> None:
         """
@@ -16,7 +27,19 @@ class GMM:
         :param covariances: Covariances of the GMM components, shape (n_clusters, n_features, n_features)
         """
 
-        pass
+        self._weights = weights
+        self._means = means
+        n_features = means.shape[1]
+        self._n_clusters = weights.shape[0]
+
+        # pre-cache normalization factors along with the inverse of the covariances
+        self._cached_compute_params = [
+            CachedComputeParams(
+                normalization_factor=1 / ((2 * np.pi)**(n_features / 2) * np.sqrt(np.linalg.det(cov))),
+                inv_cov=np.linalg.inv(cov)
+            )
+            for cov in covariances
+        ]
     
     def pdf(self, x: np.ndarray) -> float:
         """
@@ -26,8 +49,17 @@ class GMM:
         :return: float pdf
         """
 
-        # TODO implement
-        return 1
+        total_pdf = 0
+        for mixture_idx in range(self._n_clusters):
+            weight, mean, cached_params = self._weights[mixture_idx], self._means[mixture_idx], self._cached_compute_params[mixture_idx]
+
+            # compute the exponent term
+            exponent = -0.5 * (x - mean).T @ cached_params.inv_cov @ (x - mean)
+            
+            # compute the pdf for this mixture component
+            total_pdf += weight * cached_params.normalization_factor * np.exp(exponent)
+        
+        return total_pdf
 
 
 class GMMFitter:
