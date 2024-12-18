@@ -1,6 +1,7 @@
 import numpy as np
 from typing import List, Tuple
 from dataclasses import dataclass
+from algos.kmeans import KMeansFitter
 
 
 @dataclass
@@ -31,6 +32,7 @@ class GMM:
         self._means = means
         n_features = means.shape[1]
         self._n_clusters = weights.shape[0]
+        self._covariances = covariances
 
         # pre-cache normalization factors along with the inverse of the covariances
         self._cached_compute_params = [
@@ -40,7 +42,7 @@ class GMM:
             )
             for cov in covariances
         ]
-    
+
     def pdf(self, x: np.ndarray) -> float:
         """
         Compute the probability density function of the GMM at the given point
@@ -60,6 +62,15 @@ class GMM:
             total_pdf += weight * cached_params.normalization_factor * np.exp(exponent)
         
         return total_pdf
+    
+    def get_params(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Get the parameters of the GMM
+
+        :return: Tuple of weights, means, covariances
+        """
+
+        return self._weights, self._means, self._covariances
 
 
 class GMMFitter:
@@ -80,6 +91,8 @@ class GMMFitter:
         self._n_clusters = n_clusters
         self._n_features = n_features
 
+        self._k_means_fitter = KMeansFitter(n_clusters=self._n_clusters)  # for initialization
+
     def fit(self, data: np.ndarray, num_iter=20) -> List[GMM]:
         """
         Fit the GMM on data - return fitted GMM for each step with the last one
@@ -91,7 +104,7 @@ class GMMFitter:
         """
 
         # initialize the parameters
-        weights, means, covariances = self._initialize_parameters()
+        weights, means, covariances = self._initialize_parameters(data)
 
         # iterate through the EM algorithm
         gmm_list = []
@@ -105,20 +118,22 @@ class GMMFitter:
         
         return gmm_list
     
-    def _initialize_parameters(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def _initialize_parameters(self, data: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Initialize the parameters of the GMM (naively for now)
+        Initialize the parameters of the GMM
 
+        :param data: Input data to fit the GMM on, shape (n_samples, n_features)
         :return: Tuple of weights, means, covariances
         """
 
-        # make sure the covariance matrices are positive definite
-        rand_cov = np.random.rand(self._n_clusters, self._n_features, self._n_features)
-        rand_cov = rand_cov @ rand_cov.transpose(0, 2, 1)
+        # Fit KMeans
+        cluster_centroids = self._k_means_fitter.fit(data)
+
+        # initialize weights to be uniform and the cov to be identity
         return (
-            np.random.rand(self._n_clusters,),
-            np.random.rand(self._n_clusters, self._n_features),
-            rand_cov,
+            np.ones(self._n_clusters) / self._n_clusters,
+            cluster_centroids,
+            np.stack([np.eye(self._n_features) for _ in range(self._n_clusters)]),
         )
     
     def _compute_next_params(self, 
