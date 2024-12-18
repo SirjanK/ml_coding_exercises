@@ -179,8 +179,9 @@ class GMMFitter:
         optimal_means = optimal_means / assignment_sum[:, np.newaxis]  # shape (n_clusters, n_features)
 
         # compute the new covariances
-        outer_product = data_minus_means.transpose(0, 2, 1) @ data_minus_means  # shape (n_samples, n_features, n_features)
-        weighted_products = data_probabilities_conditioned_on_latent[:, :, np.newaxis, np.newaxis] * outer_product[:, np.newaxis, :, :]  # shape (n_samples, n_clusters, n_features, n_features)
+        data_minus_optimal_means = data[:, np.newaxis, :] - optimal_means[np.newaxis, :, :]  # shape (n_samples, n_clusters, n_features)
+        outer_product = data_minus_optimal_means[:, :, :, np.newaxis] @ data_minus_optimal_means[:, :, np.newaxis, :]  # shape (n_samples, n_clusters, n_features, n_features)
+        weighted_products = data_probabilities_conditioned_on_latent[:, :, np.newaxis, np.newaxis] * outer_product  # shape (n_samples, n_clusters, n_features, n_features)
         optimal_covs = np.sum(weighted_products, axis=0) / assignment_sum[:, np.newaxis, np.newaxis]  # shape (n_clusters, n_features, n_features)
 
         return optimal_weights, optimal_means, optimal_covs
