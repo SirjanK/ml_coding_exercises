@@ -1,3 +1,7 @@
 ml_coding
 notebooks/.ipynb_checkpoints/
 algos/__pycache__/
+# private code
+notebooks/assets/two_spirals
+notebooks/TwoSpirals.ipynb
+.DS_Store
