@@ -37,3 +37,5 @@ We also provide a `generate.py` script to generate text from a trained model und
 1. Simple sampling
 2. Top-k sampling with temperature
 3. Beam search with temperature
+
+This can be run either with oneshot generation or with a prompt.

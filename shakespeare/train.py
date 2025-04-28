@@ -7,6 +7,7 @@ from shakespeare.configs import LITE_CONFIG, Config
 from shakespeare.dataset import get_datasets
 from shakespeare.model import ShakespeareGPT
 from torchmetrics import Accuracy
+from typing import List
 
 
 ENCODED_DATA_FNAME = "encoded.npy"
@@ -14,6 +15,26 @@ VOCAB_FNAME = "vocab.txt"
 
 LOGS_PATH = "shakespeare/logs"
 MODEL_PATH = "shakespeare/model"
+
+
+def load_vocab(data_path: str) -> List[str]:
+    """
+    Load the vocabulary from the specified path.
+    """
+    vocab_path = os.path.join(data_path, VOCAB_FNAME)
+    with open(vocab_path, "r") as f:
+        vocab = f.read()
+    return list(vocab)
+
+
+def get_config(config_name: str) -> Config:
+    """
+    Get the configuration for the specified model.
+    """
+    if config_name == "lite":
+        return LITE_CONFIG
+    else:
+        raise ValueError("Unsupported configuration currently. Use 'lite' or 'heavy'.")
 
 
 def train(data_path: str, config: Config):
@@ -43,7 +64,8 @@ def train(data_path: str, config: Config):
     )
 
     # Initialize the model
-    vocab_size = len(open(os.path.join(data_path, VOCAB_FNAME)).read())
+    vocab = load_vocab(data_path)
+    vocab_size = len(vocab)
     model = ShakespeareGPT(
         vocab_size=vocab_size,
         block_size=config.block_size,
@@ -92,10 +114,10 @@ def train(data_path: str, config: Config):
             # store the model with best validation loss
             if loss < best_val_loss:
                 best_val_loss = loss
-                torch.save(model.state_dict(), os.path.join(dir_path, "best_model.pth"))
+                torch.save(model.state_dict(), os.path.join(MODEL_PATH, "best_model.pth"))
     
     # save the final model
-    torch.save(model.state_dict(), os.path.join(dir_path, "final_model.pth"))
+    torch.save(model.state_dict(), os.path.join(MODEL_PATH, "final_model.pth"))
 
 
 @torch.no_grad()
@@ -153,10 +175,5 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if args.config == "lite":
-        config = LITE_CONFIG
-    else:
-        raise ValueError("Unsupported configuration currently. Use 'lite' or 'heavy'.")
-    
     # run training
-    train(args.data_path, config)
+    train(args.data_path, get_config(args.config))
