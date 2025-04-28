@@ -10,3 +10,8 @@ Mock data from multiple gaussians (2D and 3D) with additive noise and implement 
 See `PositionalEncoding.ipynb`
 
 Visualize absolute sinusoidal positional encodings along with RoPE. Also visualize the dot products between learned absolute posititional encodings.
+
+## NanoGPT Reimplementation
+Reimplement the nanoGPT model from https://github.com/karpathy/nanoGPT without referencing it directly. Train a language model on Tiny Shakespeare: https://github.com/karpathy/char-rnn/blob/master/data/tinyshakespeare/input.txt and generate text from it.
+
+We implement the model from scratch and have a lite config for training on CPU and a heavy version for training on GPU.
