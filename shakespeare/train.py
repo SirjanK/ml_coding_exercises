@@ -1,4 +1,5 @@
 import os
+import shutil
 import torch
 from torch.utils.tensorboard import SummaryWriter
 from argparse import ArgumentParser
@@ -11,7 +12,8 @@ from torchmetrics import Accuracy
 ENCODED_DATA_FNAME = "encoded.npy"
 VOCAB_FNAME = "vocab.txt"
 
-LOGS_PATH = "logs"
+LOGS_PATH = "shakespeare/logs"
+MODEL_PATH = "shakespeare/model"
 
 
 def train(data_path: str, config: Config):
@@ -56,12 +58,17 @@ def train(data_path: str, config: Config):
     )
 
     # Setup tensorboard logging
+    # delete the logs/shakespeare_gpt directory if it exists
+    dir_path = os.path.join(LOGS_PATH, "shakespeare_gpt")
+    if os.path.exists(dir_path):
+        shutil.rmtree(dir_path)
     writer = SummaryWriter(
-        os.path.join(LOGS_PATH, "shakespeare_gpt"),
+        dir_path,
         flush_secs=10,
     )
 
     # Training loop
+    best_val_loss = float("inf")
     train_dataloader_iter = iter(train_dataloader)
     for i in range(config.max_iters):
         # get batch of data
@@ -81,7 +88,14 @@ def train(data_path: str, config: Config):
         if i % 100 == 0:
             writer.add_scalar("Loss/train", loss.item(), i)
         if i % config.eval_interval == 0:
-            eval_loop(model, val_dataloader, i, device, writer)
+            loss = eval_loop(model, val_dataloader, i, device, writer)
+            # store the model with best validation loss
+            if loss < best_val_loss:
+                best_val_loss = loss
+                torch.save(model.state_dict(), os.path.join(dir_path, "best_model.pth"))
+    
+    # save the final model
+    torch.save(model.state_dict(), os.path.join(dir_path, "final_model.pth"))
 
 
 @torch.no_grad()
@@ -91,7 +105,7 @@ def eval_loop(
     train_step: int,
     device: torch.device,
     writer: SummaryWriter,
-) -> None:
+) -> float:
     """
     Evaluate the model on the validation set and report the aggregated loss.
 
@@ -100,6 +114,7 @@ def eval_loop(
     :param train_step: Training step we are on.
     :param device: The device to run the evaluation on.
     :param writer: The tensorboard writer for logging.
+    :return: The loss value.
     """
     model.eval()
     accuracy_metric = Accuracy(task="multiclass", top_k=5, num_classes=model.vocab_size)
@@ -113,9 +128,11 @@ def eval_loop(
     accuracy = accuracy_metric(logits.view(B * T, V), target_data.view(B * T))
 
     writer.add_scalar("Loss/validation", loss.item(), global_step=train_step)
-    writer.add_scalar("Accuracy/validation", accuracy.item(), global_step=train_step)
+    writer.add_scalar("Top-5 Accuracy/validation", accuracy.item(), global_step=train_step)
 
     model.train()
+
+    return loss.item()
 
 
 if __name__ == "__main__":
