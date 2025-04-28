@@ -18,10 +18,10 @@ We implement the model from scratch and have a lite config for training on CPU a
 
 See `shakespeare/` for the full implementation. `train.py` is the script to launch training. We write to `logs/` for tensorboard visualization.
 
-`tokenize.py` is a one time generation script to generate a vocabulary from the text file along with tokenizing the full text into a series of integers based on
+`tokenizer.py` is a one time generation script to generate a vocabulary from the text file along with tokenizing the full text into a series of integers based on
 the vocabulary. This is saved under `shakespeare/data/` and is used for training.
 
-`dataset.py` contains the dataset class that provides data in batches to the model. It uses the tokenized data from `tokenize.py` and provides a PyTorch dataset class that can be used with a dataloader. We chunk the data into sequences of fixed length each iteration. The notion of an epoch is not used here as we keep
+`dataset.py` contains the dataset class that provides data in batches to the model. It uses the tokenized data from `tokenizer.py` and provides a PyTorch dataset class that can be used with a dataloader. We chunk the data into sequences of fixed length each iteration. The notion of an epoch is not used here as we keep
 regenerating chunks from the data.
 
 `model.py` contains the model implementation along with a function that provides the loss to train against.

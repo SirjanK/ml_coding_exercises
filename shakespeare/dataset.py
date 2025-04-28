@@ -16,7 +16,7 @@ class ShakespeareDataset(IterableDataset):
 
         # load torch tensor from encoded numpy file
         self.data = torch.from_numpy(data)
-        assert self.data.dtype == torch.uint8, "Data type must be uint8"
+        self.data = self.data.long()
         self.block_size = block_size
 
     def __iter__(self):

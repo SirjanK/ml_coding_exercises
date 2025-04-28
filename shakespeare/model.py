@@ -22,6 +22,7 @@ class ShakespeareGPT(torch.nn.Module):
         :param block_size: The maximum context length for the model.
         :param embedding_size: The size of the embedding layer.
         """
+        super(ShakespeareGPT, self).__init__()
 
         self.vocab_size = vocab_size
         self.block_size = block_size
@@ -31,7 +32,6 @@ class ShakespeareGPT(torch.nn.Module):
 
         self.loss = torch.nn.CrossEntropyLoss()
 
-        super(ShakespeareGPT, self).__init__()
     
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         """

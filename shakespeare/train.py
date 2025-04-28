@@ -63,7 +63,7 @@ def train(data_path: str, config: Config):
 
     # Training loop
     train_dataloader_iter = iter(train_dataloader)
-    for iter in range(config.max_iters):
+    for i in range(config.max_iters):
         # get batch of data
         input_data, target_data = next(train_dataloader_iter)
         input_data, target_data = input_data.to(device), target_data.to(device)
@@ -78,10 +78,10 @@ def train(data_path: str, config: Config):
         optimizer.step()
 
         # log the loss (for training log every 100 steps)
-        if iter % 100 == 0:
-            writer.add_scalar("Loss/train", loss.item(), iter)
-        if iter % config.eval_interval == 0:
-            eval_loop(model, val_dataloader, iter, device, writer)
+        if i % 100 == 0:
+            writer.add_scalar("Loss/train", loss.item(), i)
+        if i % config.eval_interval == 0:
+            eval_loop(model, val_dataloader, i, device, writer)
 
 
 @torch.no_grad()

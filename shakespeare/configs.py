@@ -12,7 +12,6 @@ class Config:
     eval_interval: int
     validation_split: float
     validation_batch_size: int
-    validation_steps: int
 
 
 # Lite config for testing out model training - meant for training on CPU (e.g. on laptop)
