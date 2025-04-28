@@ -16,9 +16,7 @@ Reimplement the nanoGPT model from https://github.com/karpathy/nanoGPT without r
 
 We implement the model from scratch and have a lite config for training on CPU and a heavy version for training on GPU.
 
-See `shakespeare/` for the full implementation. The notebook to run training can be found under `notebooks/Shakespeare.ipynb`. There, we provide two configs,
-one "lite" for CPU training and one "heavy" for GPU training. The heavy version is meant to run in Colab and can be done so by uploading both the `shakespeare`
-directory and the `Shakespeare.ipynb` notebook to Colab. We write to `logs/` for tensorboard visualization.
+See `shakespeare/` for the full implementation. `train.py` is the script to launch training. We write to `logs/` for tensorboard visualization.
 
 `tokenize.py` is a one time generation script to generate a vocabulary from the text file along with tokenizing the full text into a series of integers based on
 the vocabulary. This is saved under `shakespeare/data/` and is used for training.
@@ -30,7 +28,7 @@ regenerating chunks from the data.
 
 `train.py` contains the training loop and is used to train the model. We also periodically run validation.
 
-We don't overcomplicate by defining config classes. Instead `Shakespeare.ipynb` constructs a desired model by passing in init parameters, then provides
+We define two configs: `lite` and `heavy`. `train.py` constructs a desired model by passing in init parameters, then provides
 training parameters based on the `train()` function.
 
 We also provide a `generate.py` script to generate text from a trained model under `shakespeare/models/` along with inference configs. We support:
