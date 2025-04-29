@@ -36,7 +36,7 @@ training parameters based on the `train()` function.
 `heavy` achieves best val loss around `1.48` and a `top-5` token prediction accuracy of `86%`.
 
 Tensorboard (shows early overfitting, so we gather the model with best val loss):
-![alt text](shakespeare/res/image.png)
+![alt text](shakespeare/res/tensorboard.png)
 
 Run by: `python train.py --data_path {path/to/data} --config {lite/heavy}`
 
