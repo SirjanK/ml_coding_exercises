@@ -1,6 +1,7 @@
+import time
+import torch
 from argparse import ArgumentParser
 from typing import Iterator
-import torch
 
 from shakespeare.model import ShakespeareGPT
 from shakespeare.train import load_vocab, get_config
@@ -100,5 +101,9 @@ if __name__ == "__main__":
 
     # while we can still generate
     print(args.prompt, end="")
+    # benchmarking for token generation
+    start_time = time.time()
     for text in text_generator(tokenizer, model, args.prompt, args.length):
         print(text, end="")
+    end_time = time.time()
+    print(f"\n\nTime taken for generation: {(end_time - start_time) / args.length * 1000:.2f} milliseconds/token")
