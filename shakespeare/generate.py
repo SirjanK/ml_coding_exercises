@@ -8,16 +8,25 @@ from shakespeare.tokenizer import Tokenizer
 
 
 @torch.no_grad()
-def text_generator(tokenizer: Tokenizer, model: ShakespeareGPT, length: int) -> Iterator[str]:
+def text_generator(tokenizer: Tokenizer, model: ShakespeareGPT, prompt: str, length: int) -> Iterator[str]:
     """
     Generator for a character for the Shakespeare GPT model; returns a built text.
+
+    :param tokenizer: Tokenizer object for encoding and decoding.
+    :param model: ShakespeareGPT model object.
+    :param prompt: Initial text prompt to start the generation.
+    :param length: Length of the text to generate (in characters).
     """
 
     # list of encoded tokens so far
-    # we start off with a space character only
-    context = torch.tensor(tokenizer.encode(' '), dtype=torch.long).unsqueeze(0)  # batch size 1
+    # we start off with the prompt encoded (tokenizer.encode() will error if the prompt is not in the vocab)
+    context = torch.tensor(tokenizer.encode(prompt), dtype=torch.long).unsqueeze(0)  # batch size 1
 
     for _ in range(length):
+        # trim context if it exceeds the model's block size
+        if context.shape[1] > model.block_size:
+            context = context[:, -model.block_size:]
+
         # run model inference to get logits
         logits = model(context)  # (1, T', V) where T' is the length of the current context (T' <= T)
 
@@ -33,10 +42,7 @@ def text_generator(tokenizer: Tokenizer, model: ShakespeareGPT, length: int) -> 
 
         # update the context and next token idx
         # add the new token to the context
-        context = torch.cat((context, torch.tensor([[next_token]], dtype=torch.long)), dim=1)
-        if context.shape[1] > model.block_size:
-            # trim
-            context = context[:, -model.block_size:]
+        context = torch.cat((context, torch.tensor([[next_token]], dtype=torch.long)), dim=1) 
 
 
 if __name__ == "__main__":
@@ -66,6 +72,13 @@ if __name__ == "__main__":
         type=int,
         help="Length of the text to generate (in characters).",
     )
+    parser.add_argument(
+        "--prompt",
+        type=str,
+        required=False,
+        default=" ",  # prompt with simply a space
+        help="Text prompt to start the generation (optional).",
+    )
 
     args = parser.parse_args()
 
@@ -86,5 +99,6 @@ if __name__ == "__main__":
     model.eval()
 
     # while we can still generate
-    for text in text_generator(tokenizer, model, args.length):
+    print(args.prompt, end="")
+    for text in text_generator(tokenizer, model, args.prompt, args.length):
         print(text, end="")
