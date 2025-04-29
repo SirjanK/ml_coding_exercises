@@ -31,6 +31,8 @@ regenerating chunks from the data.
 We define two configs: `lite` and `heavy`. `train.py` constructs a desired model by passing in init parameters, then provides
 training parameters based on the `train()` function.
 
+`lite` achieves a val loss around `1.76` and a `top-5` token prediction accuracy of `80%`.
+
 Run by: `python train.py --data_path {path/to/data} --config {lite/heavy}`
 
 We also provide a `generate.py` script to generate text from a trained model under `shakespeare/models/` along with inference configs. We support:

@@ -224,7 +224,8 @@ class ShakespeareGPT(torch.nn.Module):
         positional_embeddings = self.positional_embedding_table(position_indices)  # B x T x E
 
         # add token and positional embeddings
-        token_embeddings = token_embeddings + positional_embeddings  # B x T x E
+        _, T, _ = token_embeddings.shape
+        token_embeddings = token_embeddings + positional_embeddings[:, :T, :]  # B x T x E
 
         # apply transformer blocks
         for transformer_block in self.transformer_blocks:
