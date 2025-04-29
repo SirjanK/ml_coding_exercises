@@ -146,7 +146,7 @@ def eval_loop(
     :return: The loss value.
     """
     model.eval()
-    accuracy_metric = Accuracy(task="multiclass", top_k=5, num_classes=model.vocab_size)
+    accuracy_metric = Accuracy(task="multiclass", top_k=5, num_classes=model.vocab_size).to(device)
 
     val_dataloader_iter = iter(val_dataloader)
     input_data, target_data = next(val_dataloader_iter)
