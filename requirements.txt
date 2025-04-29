@@ -1,4 +1,0 @@
-numpy==2.2.5
-tensorboard==2.19.0
-torch==2.7.0
-torchmetrics==1.7.1
