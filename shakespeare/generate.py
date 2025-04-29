@@ -15,15 +15,14 @@ def text_generator(tokenizer: Tokenizer, model: ShakespeareGPT, length: int) -> 
 
     # list of encoded tokens so far
     # we start off with a space character only
-    context = torch.tensor([tokenizer.encode(' ')[0]] * model.block_size, dtype=torch.long).unsqueeze(0)  # batch size 1
-    next_token_idx = 0  # index of the logit we should use for the next token
+    context = torch.tensor(tokenizer.encode(' '), dtype=torch.long).unsqueeze(0)  # batch size 1
 
     for _ in range(length):
         # run model inference to get logits
-        logits = model(context)  # (1, T, V)
+        logits = model(context)  # (1, T', V) where T' is the length of the current context (T' <= T)
 
         # index into next_token_idx
-        logits = logits[0, next_token_idx, :]  # (V,)
+        logits = logits[0, -1, :]  # (V,) using the last token's logit
 
         # sample from the logits (multinomial distribution)
         probs = torch.softmax(logits, dim=-1)  # (V,)
@@ -33,13 +32,11 @@ def text_generator(tokenizer: Tokenizer, model: ShakespeareGPT, length: int) -> 
         yield tokenizer.decode_single(next_token)
 
         # update the context and next token idx
-        if next_token_idx == model.block_size - 1:
-            # shift the context to the left
-            context = torch.cat((context[:, 1:], torch.tensor([[next_token]])), dim=1)
-        else:
-            # just add the new token to the context
-            next_token_idx += 1
-            context[0, next_token_idx] = next_token
+        # add the new token to the context
+        context = torch.cat((context, torch.tensor([[next_token]], dtype=torch.long)), dim=1)
+        if context.shape[1] > model.block_size:
+            # trim
+            context = context[:, -model.block_size:]
 
 
 if __name__ == "__main__":
@@ -82,6 +79,8 @@ if __name__ == "__main__":
         vocab_size=len(vocab),
         block_size=config.block_size,
         embedding_size=config.embedding_size,
+        num_layers=config.num_layers,
+        num_heads=config.num_heads,
     )
     model.load_state_dict(torch.load(args.model_path))
     model.eval()

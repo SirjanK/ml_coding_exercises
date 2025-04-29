@@ -7,6 +7,8 @@ class Config:
     batch_size: int
     block_size: int
     embedding_size: int
+    num_layers: int
+    num_heads: int
     learning_rate: float
     max_iters: int
     eval_interval: int
@@ -16,12 +18,28 @@ class Config:
 
 # Lite config for testing out model training - meant for training on CPU (e.g. on laptop)
 LITE_CONFIG = Config(
-    batch_size=32,
-    block_size=8,
+    batch_size=64,
+    block_size=32,
     embedding_size=64,
-    learning_rate=1e-3,
-    max_iters=100000,
-    eval_interval=1000,
+    num_layers=2,
+    num_heads=4,
+    learning_rate=3e-4,
+    max_iters=50000,
+    eval_interval=500,
     validation_split=0.1,
-    validation_batch_size=1000,  # examples are small, so we should be able to fit a lot in memory
+    validation_batch_size=5000,
+)
+
+# Heavy config for model training on GPU
+HEAVY_CONFIG = Config(
+    batch_size=64,
+    block_size=256,
+    embedding_size=384,
+    num_layers=6,
+    num_heads=6,
+    learning_rate=3e-4,
+    max_iters=50000,
+    eval_interval=500,
+    validation_split=0.1,
+    validation_batch_size=5000,
 )

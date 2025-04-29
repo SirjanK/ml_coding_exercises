@@ -1,37 +1,210 @@
 import torch
 
+"""
+In the code comments, we refer:
+        - B := batch size
+        - V := vocabulary size
+        - T := block size (context length)
+        - E := embedding size
+        - H := number of heads
+"""
+
+
+class CausalMultiHeadSelfAttention(torch.nn.Module):
+    """
+    Implementation of the masked multi-head self-attention mechanism module.
+    """
+
+    def __init__(self, embedding_size: int, num_heads: int, block_size: int):
+        """
+        Initialize the MaskedMultiHeadSelfAttention module.
+
+        :param embedding_size: The size of the input embeddings.
+        :param num_heads: Number of attention heads.
+        :param block_size: The maximum context length for the model.
+        """
+        super(CausalMultiHeadSelfAttention, self).__init__()
+
+        self.embedding_size = embedding_size
+        self.num_heads = num_heads
+        self.block_size = block_size 
+
+        assert self.embedding_size % self.num_heads == 0, "Embedding size must be divisible by number of heads."
+        self.head_size = self.embedding_size // self.num_heads
+
+        self._construct_parameters()
+    
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass of the module.
+
+        :param input: Input tensor of shape (B, T, E)
+        :return: Output tensor of shape (B, T, E)
+        """
+
+        # input shape: B x T x E
+        B, T, E = input.shape
+
+        # compute Q, K, V projections
+        full_qkv = self.qkv_proj(input)  # B x T x 3E
+        # slice to extract Q, K, V
+        q, k, v = full_qkv[..., :E], full_qkv[..., E:2 * E], full_qkv[..., 2 * E:]  # B x T x E for each
+
+        # reshape to separate out the heads
+        q = q.view(B, T, self.num_heads, self.head_size).transpose(1, 2)  # B x H x T x E/H
+        k = k.view(B, T, self.num_heads, self.head_size).transpose(1, 2)  # B x H x T x E/H
+        v = v.view(B, T, self.num_heads, self.head_size).transpose(1, 2)  # B x H x T x E/H
+
+        # compute dot product
+        dot_product = q @ k.transpose(2, 3)  # B x H x T x T
+        # apply mask to the dot product
+        masked_dot_product = dot_product.masked_fill(self.mask[:, :, :T, :T] == 0, float("-inf"))  # B x H x T x T
+        # scale by head size
+        scaled_dot_product = masked_dot_product / (self.head_size ** 0.5)  # B x H x T x T
+    
+        # apply softmax to get attention weights
+        attention_weights = torch.nn.functional.softmax(scaled_dot_product, dim=-1)  # B x H x T x T
+        # apply dropout to attention weights
+        attention_weights = self.attention_dropout(attention_weights)  # B x H x T x T
+
+        # compute the attention output
+        attention_output = attention_weights @ v  # B x H x T x E/H
+
+        # concat the head outputs
+        attention_output = attention_output.transpose(1, 2).contiguous().view(B, T, E)  # B x T x E
+
+        # apply the output projection and dropout
+        output = self.output_proj(attention_output)  # B x T x E
+        output = self.output_dropout(output)
+
+        return output
+    
+    def _construct_parameters(self):
+        """
+        Construct the parameters for the masked self-attention module.
+        """ 
+        # Q, K, V projection matrices for all heads (wrapped into a single projection matrix for efficiency)
+        self.qkv_proj = torch.nn.Linear(self.embedding_size, self.embedding_size * 3, bias=False)  # E x 3E
+
+        # mask for the dot products before attention
+        mask = torch.tril(torch.ones(self.block_size, self.block_size))  # T x T
+        mask = mask.view(1, 1, self.block_size, self.block_size)  # 1 x 1 x T x T
+        self.register_buffer("mask", mask)
+
+        # dropout for attention matrix
+        self.attention_dropout = torch.nn.Dropout(0.2)
+
+        # output projection matrix (concat head outputs and pass through this)
+        self.output_proj = torch.nn.Linear(self.embedding_size, self.embedding_size, bias=True)  # E x E
+
+        # dropout for output projection
+        self.output_dropout = torch.nn.Dropout(0.2)
+
+
+class FeedForwardNetwork(torch.nn.Module):
+    """
+    Simple feed-forward network module applied to each token independently after each MhSA layer.
+    """
+
+    def __init__(self, embedding_size: int, scale_factor: int = 4):
+        """
+        Initialize the FeedForwardNetwork module.
+
+        :param embedding_size: The size of the input embeddings.
+        :param scale_factor: The scale factor for the hidden layer size.
+        """
+        super(FeedForwardNetwork, self).__init__()
+
+        self.embedding_size = embedding_size
+        self.hidden_size = self.embedding_size * scale_factor
+
+        self._construct_parameters()
+    
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass of the module.
+
+        :param input: Input tensor of shape (B, T, E)
+        :return: Output tensor of shape (B, T, E)
+        """
+        return self.mlp(input)
+    
+    def _construct_parameters(self):
+        """
+        Construct the parameters for the feed-forward network.
+        """
+
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(self.embedding_size, self.hidden_size),  # E x 4E
+            torch.nn.ReLU(),
+            torch.nn.Linear(self.hidden_size, self.embedding_size),  # 4E x E
+            torch.nn.Dropout(0.2),
+        )
+
+
+class TransformerBlock(torch.nn.Module):
+    """
+    Transformer block consisting of a masked multi-head self-attention layer followed by a feed-forward network
+    with appropriate residual connections and layer normalization.
+    """
+
+    def __init__(self, embedding_size: int, num_heads: int, block_size: int):
+        """
+        Initialize the TransformerBlock module.
+
+        :param embedding_size: The size of the input embeddings.
+        :param num_heads: Number of attention heads.
+        :param block_size: The maximum context length for the model.
+        """
+        super(TransformerBlock, self).__init__()
+
+        self.layer_norm1 = torch.nn.LayerNorm(embedding_size)
+        self.mhsa = CausalMultiHeadSelfAttention(embedding_size, num_heads, block_size)
+        self.layer_norm2 = torch.nn.LayerNorm(embedding_size)
+        self.ffn = FeedForwardNetwork(embedding_size)
+    
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass of the module.
+
+        :param input: Input tensor of shape (B, T, E)
+        """
+
+        # residual connections
+        x = input + self.mhsa(self.layer_norm1(input))
+        x = x + self.ffn(self.layer_norm2(x))
+
+        return x
+
 
 class ShakespeareGPT(torch.nn.Module):
     """
     A simple GPT model for generating text based on the works of Shakespeare.
     This model is a simplified version of the GPT architecture from the nano GPT repository. We reimplement it here for practice and may not exactly
-    match the original implementation.
-
-    In the code comments, we refer:
-        - B := batch size
-        - V := vocabulary size
-        - T := block size (context length)
-        - E := embedding size
+    match the original implementation. 
     """
 
-    def __init__(self, vocab_size: int, block_size: int, embedding_size: int):
+    def __init__(self, vocab_size: int, block_size: int, embedding_size: int, num_layers: int, num_heads: int):
         """
         Initialize the ShakespeareGPT model.
 
         :param vocab_size: The size of the vocabulary.
         :param block_size: The maximum context length for the model.
         :param embedding_size: The size of the embedding layer.
+        :param num_layers: The number of transformer layers in the model.
+        :param num_heads: The number of attention heads in the model.
         """
         super(ShakespeareGPT, self).__init__()
 
         self.vocab_size = vocab_size
         self.block_size = block_size
         self.embedding_size = embedding_size
+        self.num_layers = num_layers
+        self.num_heads = num_heads
 
         self._construct_model()
 
         self.loss = torch.nn.CrossEntropyLoss()
-
     
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         """
@@ -44,11 +217,21 @@ class ShakespeareGPT(torch.nn.Module):
         # gather token embeddings
         token_embeddings = self.token_embedding_table(input)  # B x T x E
 
-        # average the token embeddings along the time dimension
-        averaged_tokens = self.averaging_mask @ token_embeddings  # B x T x E
+        position_indices = torch.arange(self.block_size, device=input.device, dtype=torch.long)  # T
+        position_indices = position_indices.unsqueeze(0).expand(input.shape[0], -1)  # B x T
+
+        # gather positional embeddings
+        positional_embeddings = self.positional_embedding_table(position_indices)  # B x T x E
+
+        # add token and positional embeddings
+        token_embeddings = token_embeddings + positional_embeddings  # B x T x E
+
+        # apply transformer blocks
+        for transformer_block in self.transformer_blocks:
+            token_embeddings = transformer_block(token_embeddings)
 
         # pass through the MLP to get logits
-        logits = self.mlp(averaged_tokens)  # B x T x V
+        logits = self.token_prediction_proj(token_embeddings)  # B x T x V
 
         return logits
 
@@ -80,14 +263,23 @@ class ShakespeareGPT(torch.nn.Module):
             embedding_dim=self.embedding_size,
         )
 
-        # causal averaging mask
-        triangular_mask = torch.tril(torch.ones((self.block_size, self.block_size)))
-        averaging_mask = triangular_mask / triangular_mask.sum(dim=-1, keepdim=True)
-        self.register_buffer("averaging_mask", averaging_mask)  # T x T
+        # positional embedding table
+        self.positional_embedding_table = torch.nn.Embedding(self.block_size, self.embedding_size)  # T x E
 
-        # MLP for taking the averaged token embeddings and predicting the next token logit
-        self.mlp = torch.nn.Sequential(
-            torch.nn.Linear(self.embedding_size, self.embedding_size),
-            torch.nn.ReLU(),
+        # gather transformer blocks
+        transformer_blocks = []
+        for _ in range(self.num_layers):
+            transformer_blocks.append(
+                TransformerBlock(
+                    embedding_size=self.embedding_size,
+                    num_heads=self.num_heads,
+                    block_size=self.block_size,
+                )
+            )
+
+        self.transformer_blocks = torch.nn.ModuleList(transformer_blocks)
+
+        # Final projection for taking the final token embedding and producing the logits
+        self.token_prediction_proj = torch.nn.Sequential(
             torch.nn.Linear(self.embedding_size, self.vocab_size),
         )

@@ -3,7 +3,7 @@ import shutil
 import torch
 from torch.utils.tensorboard import SummaryWriter
 from argparse import ArgumentParser
-from shakespeare.configs import LITE_CONFIG, Config
+from shakespeare.configs import LITE_CONFIG, HEAVY_CONFIG, Config
 from shakespeare.dataset import get_datasets
 from shakespeare.model import ShakespeareGPT
 from torchmetrics import Accuracy
@@ -15,6 +15,11 @@ VOCAB_FNAME = "vocab.txt"
 
 LOGS_PATH = "shakespeare/logs"
 MODEL_PATH = "shakespeare/model"
+
+CONFIG_MAPPER = {
+    "lite": LITE_CONFIG,
+    "heavy": HEAVY_CONFIG,
+}
 
 
 def load_vocab(data_path: str) -> List[str]:
@@ -31,10 +36,10 @@ def get_config(config_name: str) -> Config:
     """
     Get the configuration for the specified model.
     """
-    if config_name == "lite":
-        return LITE_CONFIG
+    if config_name in CONFIG_MAPPER:
+        return CONFIG_MAPPER[config_name]
     else:
-        raise ValueError("Unsupported configuration currently. Use 'lite' or 'heavy'.")
+        raise ValueError(f"Unsupported configuration currently. Use one of {CONFIG_MAPPER.keys()}.")
 
 
 def train(data_path: str, config: Config):
@@ -70,6 +75,8 @@ def train(data_path: str, config: Config):
         vocab_size=vocab_size,
         block_size=config.block_size,
         embedding_size=config.embedding_size,
+        num_heads=config.num_heads,
+        num_layers=config.num_layers,
     )
     model.to(device)
 
