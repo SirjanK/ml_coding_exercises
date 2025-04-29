@@ -53,4 +53,4 @@ From very barebones qualitative evaluation, we find this setting to work best fo
 Top-K sampling with temperature with `K=10` and temperature `T=0.8`.
 
 We also implement KV caching and show that it speeds up inference by a factor of `?x` with the above setting. Particularly we go from
-`?ms/token` to `?ms/token` with KV caching as measured in generating `1000` tokens.
+`15.59 ms/token` to `?ms/token` with KV caching as measured in generating `1000` tokens.
