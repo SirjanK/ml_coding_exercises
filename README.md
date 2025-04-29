@@ -43,16 +43,14 @@ Run by: `python train.py --data_path {path/to/data} --config {lite/heavy}`
 We also provide a `generate.py` script to generate text from a trained model under `shakespeare/models/` along with inference configs. We support:
 1. Simple sampling
 2. Top-k sampling with temperature
-3. Beam search with temperature
 
 This can be run either with oneshot generation or with a prompt.
 
 Run by: `python generate.py --data_path {path/to/data} --config {lite/heavy} --model_path {path/to/model} --length {length} --prompt {prompt}` where `prompt` is optional.
-Other options are `--topk-sampling-limit` for optional top-k sampling (defaults to sampling from the full token distribution), `--temperature` for controlling the randomness of predictions,
-`--beam-size` for beam search, `--num-beams` for number of beams. If the beam size parameters are not specified, we employ regular greedy sampling.
+Other options are `--topk-sampling-limit` for optional top-k sampling (defaults to sampling from the full token distribution), `--temperature` for controlling the randomness of predictions.
 
 From very barebones qualitative evaluation, we find this setting to work best for the `heavy` model:
-Beam search with `beam size=?`, `num beams=?`, top-K sampling with temperature with `K=?` and temperature `T=?`.
+Top-K sampling with temperature with `K=10` and temperature `T=0.8`.
 
 We also implement KV caching and show that it speeds up inference by a factor of `?x` with the above setting. Particularly we go from
 `?ms/token` to `?ms/token` with KV caching as measured in generating `1000` tokens.
