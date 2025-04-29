@@ -46,3 +46,11 @@ We also provide a `generate.py` script to generate text from a trained model und
 3. Beam search with temperature
 
 This can be run either with oneshot generation or with a prompt.
+
+Run by: `python generate.py --data_path {path/to/data} --config {lite/heavy} --model_path {path/to/model} --length {length} --prompt {prompt}` where `prompt` is optional.
+
+From very barebones qualitative evaluation, we find this setting to work best for the `heavy` model:
+Beam search with `beam size=?`, top-K sampling with temperature with `K=?` and temperature `T=?`.
+
+We also implement KV caching and show that it speeds up inference by a factor of `?x` with the above setting. Particularly we go from
+`?ms/token` to `?ms/token` with KV caching as measured in generating `1000` tokens.
