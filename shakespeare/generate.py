@@ -82,7 +82,7 @@ if __name__ == "__main__":
         num_layers=config.num_layers,
         num_heads=config.num_heads,
     )
-    model.load_state_dict(torch.load(args.model_path))
+    model.load_state_dict(torch.load(args.model_path, map_location=torch.device('cpu')))
     model.eval()
 
     # while we can still generate
