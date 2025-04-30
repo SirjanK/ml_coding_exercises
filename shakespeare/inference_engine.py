@@ -58,14 +58,7 @@ class InferenceEngine:
         :return: The model's output logits for the next token, shape (1, V)
         """
 
-        # get current context length as a tensor
-        curr_context_length = self.context.shape[1]
-        position = torch.tensor([curr_context_length], dtype=torch.long).unsqueeze(0)  # 1 x 1
-
-        # get token embedding
-        x = torch.tensor(next_token, dtype=torch.long).unsqueeze(0)  # 1 x 1
-        x = self.model.token_embedding_table(x)  # 1 x 1 x E
-        x = x + self.model.positional_embedding_table(position)  # 1 x 1 x E
+        x = self._compute_token_embedding(next_token)  # 1 x 1 x E
 
         for transformer_block in self.model.transformer_blocks:
             # run inference on single transformer block using kv cache
@@ -94,6 +87,25 @@ class InferenceEngine:
         kv_proj = F.linear(x, weight_kv)  # B x T x 2E
 
         return kv_proj
+    
+    def _compute_token_embedding(self, token: int) -> torch.Tensor:
+        """
+        Compute the token embedding for a given token.
+
+        :param token: The token to compute the embedding for
+        :return: The token embedding, shape 1 x 1 x E
+        """
+
+        # get current context length as a tensor
+        curr_context_length = self.context.shape[1]
+        position = torch.tensor([curr_context_length], dtype=torch.long).unsqueeze(0)  # 1 x 1
+
+        # get token embedding
+        x = torch.tensor(token, dtype=torch.long).unsqueeze(0)  # 1 x 1
+        x = self.model.token_embedding_table(x)  # 1 x 1 x E
+        x = x + self.model.positional_embedding_table(position)  # 1 x 1 x E
+
+        return x
 
     def _inference_transformer_block(self, x: torch.Tensor, transformer_block: TransformerBlock) -> torch.Tensor:
         """

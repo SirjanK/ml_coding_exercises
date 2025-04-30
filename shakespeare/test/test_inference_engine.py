@@ -68,10 +68,58 @@ def test_compute_kv():
     assert torch.allclose(extracted_kv, inference_kv, atol=1e-5), f"KV mismatch: {extracted_kv} vs {inference_kv}"
 
 
+def test_compute_token_embedding():
+    """
+    Test the _compute_token_embedding function in the InferenceEngine class.
+    """
+    engine = setup_inference_engine("Long live the")
+    model = engine.model
+    context = engine.context
+
+    # get the token embedding normally for the context plus a next token
+    next_token = 5 
+    next_context = torch.cat((context, torch.tensor([[next_token]], dtype=torch.long)), dim=1)  # add a dummy token
+    expected_token_embeddings = model.get_token_embeddings(next_context)[:, -1, :]
+
+    # run the _compute_token_embedding function
+    token_embedding = engine._compute_token_embedding(next_token)[:, 0, :]
+
+    # assert equivalence
+    assert torch.allclose(expected_token_embeddings, token_embedding, atol=1e-5), f"Token embedding mismatch: {expected_token_embeddings} vs {token_embedding}"
+
+
+def test_inference_mhsa():
+    """
+    Test the _inference_mhsa function in the InferenceEngine class.
+    """
+    engine = setup_inference_engine("Long live the")
+    model = engine.model
+    context = engine.context
+
+    # get the first mhsa
+    mhsa = model.transformer_blocks[0].mhsa
+
+    # get token embedding normally and pass through MHSA
+    next_token = 5
+    next_context = torch.cat((context, torch.tensor([[next_token]], dtype=torch.long)), dim=1)  # add a dummy token
+    token_embeddings = model.get_token_embeddings(next_context)  # (1, T, E)
+    expected_output = mhsa(token_embeddings)[:, -1, :]  # (1, E) using the last token's output
+
+    # run the inference engine
+    curr_token_embedding = engine._compute_token_embedding(next_token)  # (1, 1, E)
+    inference_output = engine._inference_mhsa(curr_token_embedding, mhsa)  # (1, 1, E)
+
+    # assert equivalence
+    assert torch.allclose(expected_output, inference_output, atol=1e-5), f"MHSA output mismatch: {expected_output} vs {inference_output}"
+
+
 # data provider for the prompt
 @pytest.mark.parametrize("prompt", ["Long live the", None])
 @torch.no_grad()
 def test_inference_engine(prompt: Optional[str]):
+    """
+    Test end-to-end inference engine logic compared to naive inference.
+    """
     torch.manual_seed(12)
 
     engine = setup_inference_engine(prompt=prompt)
