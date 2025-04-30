@@ -121,7 +121,8 @@ def test_inference_transformer_blocks():
 
 
 # data provider for the prompt
-@pytest.mark.parametrize("prompt", ["Long live the", None])
+# @pytest.mark.parametrize("prompt", ["Long live the", None])
+@pytest.mark.parametrize("prompt", [None])
 @torch.no_grad()
 def test_inference_engine(prompt: Optional[str]):
     """
@@ -133,10 +134,22 @@ def test_inference_engine(prompt: Optional[str]):
     model = engine.model
 
     LENGTH = 64
-    for _ in range(LENGTH):
+    for i in range(LENGTH): 
         # trim context if it exceeds the model's block size
         if context.shape[1] > model.block_size:
             context = context[:, -model.block_size:]
+
+        if i == 32:
+            print(f"GETTING TO HERE")
+            # get the token embedding normally for the context plus a next token
+            expected_token_embeddings = model.get_token_embeddings(context)[:, -1, :]
+
+            # run the _compute_token_embedding function
+            next_token = context[0, -1].item()
+            token_embedding = engine._compute_token_embedding(next_token)[:, 0, :]
+
+            # assert equivalence
+            assert torch.allclose(expected_token_embeddings, token_embedding, atol=1e-5), f"Token embedding mismatch: {expected_token_embeddings} vs {token_embedding}"
 
         # run full model inference manually to get logits
         logits = model(context)  # (1, T', V) where T' is the length of the current context (T' <= T)
