@@ -8,7 +8,7 @@ from shakespeare.train import load_vocab, get_config, MODEL_PATH
 from shakespeare.tokenizer import Tokenizer
 
 
-# test the inference engine by sampling 10 tokens using full inference and the inference engine
+# test the inference engine by sampling 300 tokens using full inference and the inference engine
 # fix the manual seed for fair comparison
 
 
@@ -42,7 +42,7 @@ def test_inference_engine(prompt: Optional[str]):
     else:
         inference_engine = InferenceEngine(model, context=context[:, :-1])  # reserve the last token for inference
 
-    for _ in range(10):
+    for _ in range(300):
         # trim context if it exceeds the model's block size
         if context.shape[1] > model.block_size:
             context = context[:, -model.block_size:]

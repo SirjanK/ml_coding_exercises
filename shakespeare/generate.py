@@ -6,6 +6,7 @@ from typing import Iterator, Optional
 from shakespeare.model import ShakespeareGPT
 from shakespeare.train import load_vocab, get_config
 from shakespeare.tokenizer import Tokenizer
+from shakespeare.inference_engine import InferenceEngine
 
 
 @torch.no_grad()
@@ -25,16 +26,19 @@ def text_generator(tokenizer: Tokenizer, model: ShakespeareGPT, prompt: str, len
     # we start off with the prompt encoded (tokenizer.encode() will error if the prompt is not in the vocab)
     context = torch.tensor(tokenizer.encode(prompt), dtype=torch.long).unsqueeze(0)  # batch size 1
 
+    # split out the context into true context and the next token
+    next_token = context[0, -1].item()  # last token of the context
+    if context.shape[1] == 1:
+        context = None
+    else:
+        context = context[:, :-1]  # remove the last token from the context
+    
+    # initialize the inference engine
+    inference_engine = InferenceEngine(model, context)
+
     for _ in range(length):
-        # trim context if it exceeds the model's block size
-        if context.shape[1] > model.block_size:
-            context = context[:, -model.block_size:]
-
-        # run model inference to get logits
-        logits = model(context)  # (1, T', V) where T' is the length of the current context (T' <= T)
-
-        # index into next_token_idx
-        logits = logits[0, -1, :]  # (V,) using the last token's logit
+        # run inference to get logits
+        logits = inference_engine.inference(next_token)[0]  # (V,)
 
         # apply temperature scaling
         logits = logits / temperature
@@ -53,9 +57,6 @@ def text_generator(tokenizer: Tokenizer, model: ShakespeareGPT, prompt: str, len
 
         # yield the decoded character
         yield tokenizer.decode_single(next_token)
-
-        # update the context and next token idx
-        context = torch.cat((context, torch.tensor([[next_token]], dtype=torch.long)), dim=1) 
 
 
 if __name__ == "__main__":

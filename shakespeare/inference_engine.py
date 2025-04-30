@@ -35,16 +35,16 @@ class InferenceEngine:
         :param next_token: The next token to append to the context for inference
         :return: The model's output logits for the next token
         """
-
-        # prune context if needed
-        if self.context is not None and self.context.shape[1] > self.block_size:
-            self.context = self.context[:, -self.block_size:]
         
         # append the next token to the context
         if self.context is None:
             self.context = torch.tensor([[next_token]], dtype=torch.long)  # batch size 1
         else:
             self.context = torch.cat((self.context, torch.tensor([[next_token]], dtype=torch.long)), dim=1)
+
+        # prune context if needed
+        if self.context is not None and self.context.shape[1] > self.block_size:
+            self.context = self.context[:, -self.block_size:]
 
         # run model inference to get logits
         logits = self.model(self.context)
