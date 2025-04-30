@@ -31,7 +31,7 @@ regenerating chunks from the data.
 We define two configs: `lite` and `heavy`. `train.py` constructs a desired model by passing in init parameters, then provides
 training parameters based on the `train()` function.
 
-`lite` achieves best val loss around `1.76` and a `top-5` token prediction accuracy of `80%`.
+`lite` achieves best val loss around `1.78` and a `top-5` token prediction accuracy of `80%`.
 
 `heavy` achieves best val loss around `1.48` and a `top-5` token prediction accuracy of `86%`.
 

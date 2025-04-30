@@ -8,7 +8,7 @@ from shakespeare.train import load_vocab, get_config, MODEL_PATH
 from shakespeare.tokenizer import Tokenizer
 
 
-# test the inference engine by sampling 300 tokens using full inference and the inference engine
+# test the inference engine by sampling 100 tokens using full inference and the inference engine
 # fix the manual seed for fair comparison
 
 
@@ -48,6 +48,10 @@ def setup_inference_engine(prompt: Optional[str] = None) -> Tuple[torch.Tensor, 
 def test_compute_token_embedding():
     """
     Test the _compute_token_embedding function in the InferenceEngine class.
+
+    NOTE: this holds when we have <= block_size. It fails when we have the context be greater than this since
+    the position is now disconnected. HOWEVER, the resulting dot products should be the same as that relies on the 
+    delta between the two embeddings. This is tested in the test_inference_engine function.
     """
     context, engine = setup_inference_engine("Long live the")
     model = engine.model
@@ -133,7 +137,7 @@ def test_inference_engine(prompt: Optional[str]):
     context, engine = setup_inference_engine(prompt=prompt)
     model = engine.model
 
-    LENGTH = 64
+    LENGTH = 100
     for i in range(LENGTH): 
         # trim context if it exceeds the model's block size
         if context.shape[1] > model.block_size:

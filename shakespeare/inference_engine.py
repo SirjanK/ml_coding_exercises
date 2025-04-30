@@ -86,17 +86,21 @@ class InferenceEngine:
         Compute the token embedding for a given token.
 
         :param token: The token to compute the embedding for
-        :param pos: position for the token
         :return: The token embedding, shape 1 x 1 x E
         """
-
-        # get pos as a tensor
-        position = torch.tensor([self.pos], dtype=torch.long).unsqueeze(0)  # 1 x 1
 
         # get token embedding
         x = torch.tensor(token, dtype=torch.long).unsqueeze(0)  # 1 x 1
         x = self.model.token_embedding_table(x)  # 1 x 1 x E
-        x = x + self.model.positional_embedding_table(position)  # 1 x 1 x E
+
+        # rotate the token embedding
+        # scale theta by the current position
+        scaled_thetas = self.pos * self.model.thetas  # E
+        x = self.model.rotate_for_position(
+            x,
+            sin=torch.sin(scaled_thetas).unsqueeze(0),
+            cos=torch.cos(scaled_thetas).unsqueeze(0),
+        )  # 1 x 1 x E
 
         return x
 
