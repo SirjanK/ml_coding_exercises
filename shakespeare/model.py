@@ -271,8 +271,18 @@ class ShakespeareGPT(torch.nn.Module):
             embedding_dim=self.embedding_size,
         )
 
-        # positional embedding table
-        self.positional_embedding_table = torch.nn.Embedding(self.block_size, self.embedding_size)  # T x E
+        # cached RoPE tables for positional encodings
+        thetas = 10000 ** (-torch.arange(0, self.embedding_size, 2, dtype=torch.float32) / self.embedding_size)  # (E/2,)
+        # repeat thetas
+        thetas = torch.repeat_interleave(thetas, 2)  # (E,)
+        self.register_buffer("thetas", thetas)
+        # precompute sin and cosines for RoPE
+        expanded_thetas = thetas.unsqueeze(0).repeat(self.block_size, 1)  # (T, E)
+        scaled_thetas = torch.arange(self.block_size, dtype=torch.float32).unsqueeze(1) * expanded_thetas  # (T, E)
+        sin = torch.sin(scaled_thetas)  # (T, E)
+        cos = torch.cos(scaled_thetas)  # (T, E)
+        self.register_buffer("sin", sin)
+        self.register_buffer("cos", cos)
 
         # gather transformer blocks
         transformer_blocks = []
@@ -303,14 +313,37 @@ class ShakespeareGPT(torch.nn.Module):
         # gather token embeddings
         token_embeddings = self.token_embedding_table(input)  # B x T x E
 
-        position_indices = torch.arange(self.block_size, device=input.device, dtype=torch.long)  # T
-        position_indices = position_indices.unsqueeze(0).expand(input.shape[0], -1)  # B x T
-
-        # gather positional embeddings
-        positional_embeddings = self.positional_embedding_table(position_indices)  # B x T x E
-
-        # add token and positional embeddings
         _, T, _ = token_embeddings.shape
-        token_embeddings = token_embeddings + positional_embeddings[:, :T, :]  # B x T x E
+
+        # rotate by positional encoding
+        token_embeddings = self.rotate_for_position(
+            x=token_embeddings,
+            sin=self.sin[:T, :],
+            cos=self.cos[:T, :],
+        )
 
         return token_embeddings
+    
+    def rotate_for_position(self, x: torch.Tensor, sin: torch.Tensor, cos: torch.Tensor) -> torch.Tensor:
+        """
+        Rotate the input tensor using the precomputed sine and cosine values for RoPE.
+
+        :param x: Input tensor of shape (B, T, E).
+        :param sin: Sine tensor of shape (T, E).
+        :param cos: Cosine tensor of shape (T, E).
+        :return: Rotated tensor of shape (B, T, E).
+        """
+
+        B, T, E = x.shape
+
+        # chunk x appropriately to apply sine scaling
+        reshaped_x = x.view(B, T, E // 2, 2)
+        # flip the last dimension
+        reshaped_x = reshaped_x[..., [1, 0]]
+        # negate the first of each pair
+        reshaped_x[..., 0] = -reshaped_x[..., 0]
+        # flatten the last dimension
+        reshaped_x = reshaped_x.view(B, T, E)
+
+        # apply sine and cosine scaling
+        return x * cos + reshaped_x * sin
