@@ -43,14 +43,14 @@ class CausalMultiHeadSelfAttention(torch.nn.Module):
         """
 
         # input shape: B x T x E
-        E = input.shape[-1]
+        _, T, E = input.shape
 
         # compute Q, K, V projections
         full_qkv = self.qkv_proj(input)  # B x T x 3E
         # slice to extract Q, K, V
         q, k, v = full_qkv[..., :E], full_qkv[..., E:2 * E], full_qkv[..., 2 * E:]  # B x T x E for each
 
-        return self.mhsa_with_qkv(q, k, v)  # B x T x E
+        return self.mhsa_with_qkv(q, k, v, self.mask[:, :, :T, :T])  # B x T x E
     
     def _construct_parameters(self):
         """
@@ -73,13 +73,15 @@ class CausalMultiHeadSelfAttention(torch.nn.Module):
         # dropout for output projection
         self.output_dropout = torch.nn.Dropout(0.2)
     
-    def mhsa_with_qkv(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    def mhsa_with_qkv(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dot_product_mask: torch.Tensor) -> torch.Tensor:
         """
         Compute the masked multi-head self-attention output using pre-computed Q, K, V.
 
         :param q: Query tensor of shape (B, T_q, E)
         :param k: Key tensor of shape (B, T_kv, E)
         :param v: Value tensor of shape (B, T_kv, E)
+        :param dot_product_mask: Mask tensor of shape (1, 1, T_q, T_kv) to apply to the dot product. 0s indicate where we don't want attention
+        to be computed (i.e. filled with -inf before softmax).
         :return: Output tensor of shape (B, T_q, E)
         """
 
@@ -94,7 +96,7 @@ class CausalMultiHeadSelfAttention(torch.nn.Module):
         # compute dot product
         dot_product = q @ k.transpose(2, 3)  # B x H x T_q x T_kv
         # apply mask to the dot product
-        masked_dot_product = dot_product.masked_fill(self.mask[:, :, :T_q, :T_kv] == 0, float("-inf"))  # B x H x T_q x T_kv
+        masked_dot_product = dot_product.masked_fill(dot_product_mask == 0, float("-inf"))  # B x H x T_q x T_kv
         # scale by head size
         scaled_dot_product = masked_dot_product / (self.head_size ** 0.5)  # B x H x T_q x T_kv
     

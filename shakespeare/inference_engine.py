@@ -31,8 +31,16 @@ class InferenceEngine:
             # prune to get T-1 tokens
             self.context = self.context[:, -self.block_size + 1:]
         
-        # TODO(sirjan) handle context is None case
-        if self.context is not None:
+        if self.context is None:
+            # if no context is provided, set it to an empty tensor of desired shape
+            self.context = torch.empty((1, 0), dtype=torch.long)
+
+            # also initialize the KV cache to empty tensors of desired shape
+            self.kv_cache = {
+                transformer_block.mhsa: torch.empty((1, 0, 2 * model.embedding_size), dtype=torch.float32)
+                for transformer_block in model.transformer_blocks
+            }
+        else:
             # apply the model's embedding layer to the context along with positional encoding
             x = self.model.get_token_embeddings(self.context)
             # dictionary from transformer block to the cached key and value tensors for the current context

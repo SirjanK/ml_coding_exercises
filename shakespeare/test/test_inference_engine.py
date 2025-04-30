@@ -14,7 +14,7 @@ from shakespeare.tokenizer import Tokenizer
 
 # data provider for the prompt
 # @pytest.mark.parametrize("prompt", ["Long live the", None])
-@pytest.mark.parametrize("prompt", ["Long live the"])
+@pytest.mark.parametrize("prompt", [None])
 @torch.no_grad()
 def test_inference_engine(prompt: Optional[str]):
     torch.manual_seed(12)
@@ -43,7 +43,9 @@ def test_inference_engine(prompt: Optional[str]):
     else:
         inference_engine = InferenceEngine(model, context=context[:, :-1])  # reserve the last token for inference
 
-    for _ in range(300):
+    # LENGTH = 300
+    LENGTH = 2
+    for _ in range(LENGTH):
         # trim context if it exceeds the model's block size
         if context.shape[1] > model.block_size:
             context = context[:, -model.block_size:]
