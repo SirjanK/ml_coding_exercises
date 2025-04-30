@@ -61,7 +61,7 @@ class InferenceEngine:
         # pass through final projection layer
         x = torch.squeeze(self.model.token_prediction_proj(x), dim=0)  # 1 x V
 
-        self.pos = min(self.pos + 1, self.block_size - 1)  # increment position (max is block_size - 1)
+        self.pos += 1
 
         return x
     
