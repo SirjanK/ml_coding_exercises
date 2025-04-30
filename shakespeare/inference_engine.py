@@ -58,7 +58,23 @@ class InferenceEngine:
         :return: The model's output logits for the next token, shape (1, V)
         """
 
-        return self._inference_on_next_token(next_token)
+        # get current context length as a tensor
+        curr_context_length = self.context.shape[1]
+        position = torch.tensor([curr_context_length], dtype=torch.long).unsqueeze(0)  # 1 x 1
+
+        # get token embedding
+        x = torch.tensor(next_token, dtype=torch.long).unsqueeze(0)  # 1 x 1
+        x = self.model.token_embedding_table(x)  # 1 x 1 x E
+        x = x + self.model.positional_embedding_table(position)  # 1 x 1 x E
+
+        for transformer_block in self.model.transformer_blocks:
+            # run inference on single transformer block using kv cache
+            x = self._inference_transformer_block(x, transformer_block)  # 1 x 1 x E
+
+        # pass through final projection layer
+        x = torch.squeeze(self.model.token_prediction_proj(x), dim=0)  # 1 x V
+
+        return x
     
     def _compute_kv(self, x: torch.Tensor, mhsa: CausalMultiHeadSelfAttention) -> torch.Tensor:
         """
@@ -79,32 +95,6 @@ class InferenceEngine:
 
         return kv_proj
 
-    def _inference_on_next_token(self, next_token: int) -> torch.Tensor:
-        """
-        Run inference on the next token and update the KV cache.
-
-        :param next_token: The next token to append to the context for inference
-        :return: The model's output logits for the next token, shape (1, V)
-        """
-
-        # get current context length as a tensor
-        curr_context_length = self.context.shape[1]
-        position = torch.tensor([curr_context_length], dtype=torch.long).unsqueeze(0)  # 1 x 1
-
-        # get token embedding
-        x = torch.tensor(next_token, dtype=torch.long).unsqueeze(0)  # 1 x 1
-        x = self.model.token_embedding_table(x)  # 1 x 1 x E
-        x = x + self.model.positional_embedding_table(position)  # 1 x 1 x E
-
-        for transformer_block in self.model.transformer_blocks:
-            # run inference on single transformer block using kv cache
-            x = self._inference_transformer_block(x, transformer_block)  # 1 x 1 x E
-
-        # pass through final projection layer
-        x = torch.squeeze(self.model.token_prediction_proj(x), dim=0)  # 1 x V
-
-        return x
-    
     def _inference_transformer_block(self, x: torch.Tensor, transformer_block: TransformerBlock) -> torch.Tensor:
         """
         Inference on a single transformer block using the KV cache.

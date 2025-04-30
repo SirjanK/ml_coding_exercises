@@ -12,13 +12,11 @@ from shakespeare.tokenizer import Tokenizer
 # fix the manual seed for fair comparison
 
 
-# data provider for the prompt
-@pytest.mark.parametrize("prompt", ["Long live the", None])
-@torch.no_grad()
-def test_inference_engine(prompt: Optional[str]):
-    torch.manual_seed(12)
+def setup_inference_engine(prompt: Optional[str] = None) -> InferenceEngine:
+    """
+    Setup the inference engine with the given prompt.
+    """
 
-    # load the lite model and tokenizer
     config = get_config('lite')
     vocab = load_vocab("shakespeare/data")
     tokenizer = Tokenizer(vocab)
@@ -41,6 +39,48 @@ def test_inference_engine(prompt: Optional[str]):
         inference_engine = InferenceEngine(model, context=None)
     else:
         inference_engine = InferenceEngine(model, context=context[:, :-1])  # reserve the last token for inference
+    
+    return inference_engine
+
+
+def test_compute_kv():
+    """
+    Test for the _compute_kv function in the InferenceEngine class.
+    """
+
+    engine = setup_inference_engine("Long live the")
+    model = engine.model
+    context = engine.context
+
+    token_embeddings = model.get_token_embeddings(context)
+
+    # get first mhsa
+    mhsa = model.transformer_blocks[0].mhsa
+
+    # run full QKV inference manually, extract out K, V matrices
+    qkv = mhsa.qkv_proj(token_embeddings)
+    extracted_kv = qkv[:, :, model.embedding_size:]  # (1, T, 2 * E) where T is the length of the context
+
+    # run _compute_kv from inference engine
+    inference_kv = engine._compute_kv(token_embeddings, mhsa)
+
+    # assert equivalence
+    assert torch.allclose(extracted_kv, inference_kv, atol=1e-5), f"KV mismatch: {extracted_kv} vs {inference_kv}"
+
+
+# data provider for the prompt
+@pytest.mark.parametrize("prompt", ["Long live the", None])
+@torch.no_grad()
+def test_inference_engine(prompt: Optional[str]):
+    torch.manual_seed(12)
+
+    engine = setup_inference_engine(prompt=prompt)
+    model = engine.model
+
+    context = prompt if prompt is not None else " "
+    vocab = load_vocab("shakespeare/data")
+    tokenizer = Tokenizer(vocab)
+    context = torch.tensor(tokenizer.encode(context), dtype=torch.long).unsqueeze(0)  # batch size 1
 
     LENGTH = 300
     for _ in range(LENGTH):
@@ -55,7 +95,7 @@ def test_inference_engine(prompt: Optional[str]):
         logits = logits[0, -1, :]  # (V,) using the last token's logit
 
         # run inference engine on the latest token logits
-        inference_engine_logits = inference_engine.inference(context[0, -1].item())
+        inference_engine_logits = engine.inference(context[0, -1].item())
 
         # assert equivalence of logits
         assert torch.allclose(logits, inference_engine_logits, atol=1e-5), f"Logits mismatch: {logits} vs {inference_engine_logits}"
