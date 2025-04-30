@@ -31,7 +31,7 @@ def test_inference_engine():
     context = torch.tensor(tokenizer.encode("Long live the"), dtype=torch.long).unsqueeze(0)  # batch size 1
 
     # create the inference engine
-    inference_engine = InferenceEngine(model, context[0, :-1])
+    inference_engine = InferenceEngine(model, context[:, :-1])
 
     for _ in range(10):
         # trim context if it exceeds the model's block size

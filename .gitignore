@@ -1,7 +1,7 @@
 ml_coding
 notebooks/.ipynb_checkpoints/
 .DS_Store
-/*/__pycache__/
+**/__pycache__/
 /*/logs/
 .venv/
 # private code

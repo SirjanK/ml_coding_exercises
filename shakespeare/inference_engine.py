@@ -22,6 +22,8 @@ class InferenceEngine:
         self.model = model
         self.model.eval()
 
+        self.block_size = model.block_size
+
         self.context = context
     
     @torch.no_grad()
@@ -33,4 +35,15 @@ class InferenceEngine:
         :return: The model's output logits for the next token
         """
 
-        return torch.rand(self.model.vocab_size)  # Placeholder for actual inference logic
+        # prune context if needed
+        if self.context.shape[1] > self.block_size:
+            self.context = self.context[:, -self.block_size:]
+        
+        # append the next token to the context
+        self.context = torch.cat((self.context, torch.tensor([[next_token]], dtype=torch.long)), dim=1)
+
+        # run model inference to get logits
+        logits = self.model(self.context)
+
+        # index into latest token idx and return
+        return logits[:, -1, :]  # (1, V): the last token's logit
