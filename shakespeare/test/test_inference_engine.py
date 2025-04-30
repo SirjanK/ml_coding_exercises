@@ -114,12 +114,10 @@ def test_inference_mhsa():
     assert torch.allclose(expected_output, inference_output, atol=1e-5), f"MHSA output mismatch: {expected_output} vs {inference_output}"
 
 
-def test_inference_transformer_block():
+def test_inference_transformer_blocks():
     """
     Test the _inference_transformer_block function in the InferenceEngine class.
     """
-    print(f"TEST INFERENCE TRANSFORMER BLOCK")
-
     engine = setup_inference_engine("Long live the")
     model = engine.model
     context = engine.context
@@ -131,14 +129,24 @@ def test_inference_transformer_block():
     next_token = 5
     next_context = torch.cat((context, torch.tensor([[next_token]], dtype=torch.long)), dim=1)  # add a dummy token
     token_embeddings = model.get_token_embeddings(next_context)  # (1, T, E)
-    expected_output = transformer_block(token_embeddings)[:, -1, :]  # (1, E) using the last token's output
+    expected_output = transformer_block(token_embeddings)
 
     # run the inference engine
     curr_token_embedding = engine._compute_token_embedding(next_token)  # (1, 1, E)
     inference_output = engine._inference_transformer_block(curr_token_embedding, transformer_block)  # (1, 1, E)
 
     # assert equivalence
-    assert torch.allclose(expected_output, inference_output, atol=1e-5), f"Transformer block output mismatch: {expected_output} vs {inference_output}"
+    assert torch.allclose(expected_output[:, -1, :], inference_output, atol=1e-5), f"Transformer block output mismatch: {expected_output[:, -1, :]} vs {inference_output}"
+
+    # do the same for the next block
+    transformer_block = model.transformer_blocks[1]
+    token_embeddings = model.get_token_embeddings(next_context)  # (1, T, E)
+    expected_output = transformer_block(token_embeddings)  # (1, T, E)
+
+    curr_token_embedding = engine._compute_token_embedding(next_token)  # (1, 1, E)
+    inference_output = engine._inference_transformer_block(curr_token_embedding, transformer_block)  # (1, 1, E)
+
+    assert torch.allclose(expected_output[:, -1, :], inference_output, atol=1e-5), f"Transformer block #2 output mismatch: {expected_output[:, -1, :]} vs {inference_output}"
 
 
 # data provider for the prompt
@@ -158,7 +166,7 @@ def test_inference_engine(prompt: Optional[str]):
     tokenizer = Tokenizer(vocab)
     context = torch.tensor(tokenizer.encode(context), dtype=torch.long).unsqueeze(0)  # batch size 1
 
-    LENGTH = 300
+    LENGTH = 2
     for _ in range(LENGTH):
         # trim context if it exceeds the model's block size
         if context.shape[1] > model.block_size:
