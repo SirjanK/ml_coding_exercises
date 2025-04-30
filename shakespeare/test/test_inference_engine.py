@@ -1,5 +1,7 @@
 import torch
 import os
+import pytest
+from typing import Optional
 from shakespeare.inference_engine import InferenceEngine
 from shakespeare.model import ShakespeareGPT
 from shakespeare.train import load_vocab, get_config, MODEL_PATH
@@ -10,7 +12,10 @@ from shakespeare.tokenizer import Tokenizer
 # fix the manual seed for fair comparison
 
 
-def test_inference_engine():
+# data provider for the prompt
+@pytest.mark.parametrize("prompt", ["Long live the", None])
+@torch.no_grad()
+def test_inference_engine(prompt: Optional[str]):
     torch.manual_seed(12)
 
     # load the lite model and tokenizer
@@ -28,10 +33,14 @@ def test_inference_engine():
     model.eval()
 
     # initial context
-    context = torch.tensor(tokenizer.encode("Long live the"), dtype=torch.long).unsqueeze(0)  # batch size 1
+    expanded_prompt = prompt if prompt is not None else " "
+    context = torch.tensor(tokenizer.encode(expanded_prompt), dtype=torch.long).unsqueeze(0)  # batch size 1
 
     # create the inference engine
-    inference_engine = InferenceEngine(model, context[:, :-1])
+    if prompt is None:
+        inference_engine = InferenceEngine(model, context=None)
+    else:
+        inference_engine = InferenceEngine(model, context=context[:, :-1])  # reserve the last token for inference
 
     for _ in range(10):
         # trim context if it exceeds the model's block size
@@ -39,12 +48,15 @@ def test_inference_engine():
             context = context[:, -model.block_size:]
 
         # run full model inference manually to get logits
+        print(f"Raw Context: {context}")
         logits = model(context)  # (1, T', V) where T' is the length of the current context (T' <= T)
 
         # index into next_token_idx
         logits = logits[0, -1, :]  # (V,) using the last token's logit
 
         # run inference engine on the latest token logits
+        print(f"Inference engine context: {context}")
+        print(f"Inference engine next token: {context[0, -1].item()}")
         inference_engine_logits = inference_engine.inference(context[0, -1].item())
 
         # assert equivalence of logits

@@ -1,5 +1,6 @@
 import torch
 from shakespeare.model import ShakespeareGPT
+from typing import Optional
 
 
 class InferenceEngine:
@@ -11,7 +12,7 @@ class InferenceEngine:
     that we then add to the context for the next inference call.
     """
 
-    def __init__(self, model: ShakespeareGPT, context: torch.Tensor):
+    def __init__(self, model: ShakespeareGPT, context: Optional[torch.Tensor] = None):
         """
         Initialize the inference engine
 
@@ -36,11 +37,14 @@ class InferenceEngine:
         """
 
         # prune context if needed
-        if self.context.shape[1] > self.block_size:
+        if self.context is not None and self.context.shape[1] > self.block_size:
             self.context = self.context[:, -self.block_size:]
         
         # append the next token to the context
-        self.context = torch.cat((self.context, torch.tensor([[next_token]], dtype=torch.long)), dim=1)
+        if self.context is None:
+            self.context = torch.tensor([[next_token]], dtype=torch.long)  # batch size 1
+        else:
+            self.context = torch.cat((self.context, torch.tensor([[next_token]], dtype=torch.long)), dim=1)
 
         # run model inference to get logits
         logits = self.model(self.context)
