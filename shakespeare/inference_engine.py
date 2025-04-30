@@ -130,14 +130,14 @@ class InferenceEngine:
         # we undergo a forward pass through the transformer blocks, extracting the KV cache each time
         for transformer_block in self.model.transformer_blocks:
             x_tmp = transformer_block.layer_norm1(x)  # apply layer norm
-            # get rotated version of x_tmp
-            rotated_x = transformer_block.mhsa.rotate_for_position(
-                x_tmp, 
-                sin=transformer_block.mhsa.sin[:T, :], 
-                cos=transformer_block.mhsa.cos[:T, :],
-            )
-            k = transformer_block.mhsa.k_proj(rotated_x)  # 1 x T x E
+            k = transformer_block.mhsa.k_proj(x_tmp)  # 1 x T x E
             v = transformer_block.mhsa.v_proj(x_tmp)  # 1 x T x E
+            # rotate k
+            k = transformer_block.mhsa.rotate_for_position(
+                k, 
+                sin=transformer_block.mhsa.sin[:T, :],
+                cos=transformer_block.mhsa.cos[:T, :],
+            )  # 1 x T x E
             # concat K, V to the cache
             self.kv_caches[transformer_block.mhsa] = KVCache(max_length=self.block_size, embedding_size=E, init_k=k, init_v=v)
             # apply the full transformer block to x
@@ -179,23 +179,27 @@ class InferenceEngine:
         :param mhsa: The MHSA layer to run inference on
         :return: The output tensor from the MHSA layer, shape 1 x 1 x E; the KV cache is updated internally
         """
+ 
+        # compute q, k, v, (1, 1, E) for each
+        curr_q = mhsa.q_proj(x)
+        curr_k = mhsa.k_proj(x)
+        curr_v = mhsa.v_proj(x)
 
-        # get rotated version of x
-        print(f"self.pos: {self.pos}")
+        # rotate q, k
         scaled_thetas = mhsa.thetas * self.pos
         sin = torch.sin(scaled_thetas)
         cos = torch.cos(scaled_thetas)
-        rotated_x = mhsa.rotate_for_position(
-            x,
+
+        curr_q = mhsa.rotate_for_position(
+            curr_q,
             sin=sin.unsqueeze(0),
             cos=cos.unsqueeze(0),
         )
-
-        # compute Q, K using rotated x
-        curr_q = mhsa.q_proj(rotated_x)  # 1 x 1 x E
-        curr_k = mhsa.k_proj(rotated_x)  # 1 x 1 x E
-        # compute V using the original x
-        curr_v = mhsa.v_proj(x)
+        curr_k = mhsa.rotate_for_position(
+            curr_k,
+            sin=sin.unsqueeze(0),
+            cos=cos.unsqueeze(0),
+        )
 
         # concat k, v to the cache
         cache = self.kv_caches[mhsa]
