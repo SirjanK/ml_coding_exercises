@@ -45,7 +45,7 @@ def test_inference_engine(prompt: Optional[str]):
 
     # LENGTH = 300
     LENGTH = 2
-    for _ in range(LENGTH):
+    for i in range(LENGTH):
         # trim context if it exceeds the model's block size
         if context.shape[1] > model.block_size:
             context = context[:, -model.block_size:]

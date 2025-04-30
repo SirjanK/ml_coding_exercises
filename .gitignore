@@ -7,3 +7,5 @@ notebooks/.ipynb_checkpoints/
 # private code
 notebooks/assets/two_spirals
 notebooks/TwoSpirals.ipynb
+# model artifacts
+shakespeare/model/*.pth

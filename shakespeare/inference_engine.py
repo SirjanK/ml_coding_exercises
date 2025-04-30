@@ -143,7 +143,9 @@ class InferenceEngine:
         k, v = self.kv_cache[mhsa][:, :, :E], self.kv_cache[mhsa][:, :, E:]
 
         # run inference
-        x = mhsa.mhsa_with_qkv(curr_q, k, v)
+        T_kv = self.kv_cache[mhsa].shape[1]
+        mask = torch.ones(1, 1, 1, T_kv, dtype=torch.bool)  # attend to every position (T_q = 1)
+        x = mhsa.mhsa_with_qkv(curr_q, k, v, dot_product_mask=mask)
 
         # update the cache (if it is full, prune the first token)
         if self.kv_cache[mhsa].shape[1] >= self.block_size:
