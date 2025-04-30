@@ -131,7 +131,11 @@ class InferenceEngine:
         for transformer_block in self.model.transformer_blocks:
             x_tmp = transformer_block.layer_norm1(x)  # apply layer norm
             # get rotated version of x_tmp
-            rotated_x = transformer_block.mhsa.rotate_for_position(x_tmp, sin=transformer_block.mhsa.sin[:T, :], cos=transformer_block.mhsa.cos[:T, :])
+            rotated_x = transformer_block.mhsa.rotate_for_position(
+                x_tmp, 
+                sin=transformer_block.mhsa.sin[:T, :], 
+                cos=transformer_block.mhsa.cos[:T, :],
+            )
             k = transformer_block.mhsa.k_proj(rotated_x)  # 1 x T x E
             v = transformer_block.mhsa.v_proj(x_tmp)  # 1 x T x E
             # concat K, V to the cache
@@ -176,9 +180,8 @@ class InferenceEngine:
         :return: The output tensor from the MHSA layer, shape 1 x 1 x E; the KV cache is updated internally
         """
 
-        E = x.shape[-1]
-
         # get rotated version of x
+        print(f"self.pos: {self.pos}")
         scaled_thetas = mhsa.thetas * self.pos
         sin = torch.sin(scaled_thetas)
         cos = torch.cos(scaled_thetas)

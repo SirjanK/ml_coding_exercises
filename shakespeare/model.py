@@ -45,30 +45,40 @@ class CausalMultiHeadSelfAttention(torch.nn.Module):
         # input shape: B x T x E
         _, T, _ = input.shape
 
-        # rotate input for RoPE
-        rope_rotated_input = self.rotate_for_position(input, self.sin[:T, :], self.cos[:T, :])  # B x T x E
-
-        # compute Q, K, V projections - Q, K applied to rope, V to input
-        q = self.q_proj(rope_rotated_input)  # B x T x E
-        k = self.k_proj(rope_rotated_input)  # B x T x E
+        # compute Q, K, V projections
+        q = self.q_proj(input)  # B x T x E
+        k = self.k_proj(input)  # B x T x E
         v = self.v_proj(input)  # B x T x E
 
-        return self.mhsa_with_qkv(q, k, v, self.mask[:, :, :T, :T])  # B x T x E
+        # apply RoPE to q, k
+        rotated_q = self.rotate_for_position(
+            q, 
+            self.sin[:T, :], 
+            self.cos[:T, :],
+        )
+        rotated_k = self.rotate_for_position(
+            k, 
+            self.sin[:T, :], 
+            self.cos[:T, :],
+        )
+
+        return self.mhsa_with_qkv(rotated_q, rotated_k, v, self.mask[:, :, :T, :T])  # B x T x E
     
     def _construct_parameters(self):
         """
         Construct the parameters for the masked self-attention module.
         """ 
+        # denote D = head_size = E / H
         # cached RoPE tables for positional encodings
-        thetas = 10000 ** (-torch.arange(0, self.embedding_size, 2, dtype=torch.float32) / self.embedding_size)  # (E/2,)
+        thetas = 10000 ** (-torch.arange(0, self.head_size, 2, dtype=torch.float32) / self.head_size)  # (D/2,)
         # repeat thetas
-        thetas = torch.repeat_interleave(thetas, 2)  # (E,)
+        thetas = torch.repeat_interleave(thetas, 2)  # (D,)
         self.register_buffer("thetas", thetas)
         # precompute sin and cosines for RoPE
-        expanded_thetas = thetas.unsqueeze(0).repeat(self.block_size, 1)  # (T, E)
-        scaled_thetas = torch.arange(self.block_size, dtype=torch.float32).unsqueeze(1) * expanded_thetas  # (T, E)
-        sin = torch.sin(scaled_thetas)  # (T, E)
-        cos = torch.cos(scaled_thetas)  # (T, E)
+        expanded_thetas = thetas.unsqueeze(0).repeat(self.block_size, 1)  # (T, D)
+        scaled_thetas = torch.arange(self.block_size, dtype=torch.float32).unsqueeze(1) * expanded_thetas  # (T, D)
+        sin = torch.sin(scaled_thetas)  # (T, D)
+        cos = torch.cos(scaled_thetas)  # (T, D)
         self.register_buffer("sin", sin)
         self.register_buffer("cos", cos)
 
@@ -104,12 +114,11 @@ class CausalMultiHeadSelfAttention(torch.nn.Module):
         """
 
         B, T_q, E = q.shape
-        T_kv = k.shape[1]
 
         # reshape to separate out the heads
-        q = q.view(B, T_q, self.num_heads, self.head_size).transpose(1, 2)  # B x H x T_q x E/H
-        k = k.view(B, T_kv, self.num_heads, self.head_size).transpose(1, 2)  # B x H x T_kv x E/H
-        v = v.view(B, T_kv, self.num_heads, self.head_size).transpose(1, 2)  # B x H x T_kv x E/H
+        q = self._view_for_multiple_heads(q)  # B x H x T_q x E/H
+        k = self._view_for_multiple_heads(k)  # B x H x T_kv x E/H
+        v = self._view_for_multiple_heads(v)  # B x H x T_kv x E/H
 
         # compute dot product
         dot_product = q @ k.transpose(2, 3)  # B x H x T_q x T_kv
@@ -134,7 +143,7 @@ class CausalMultiHeadSelfAttention(torch.nn.Module):
         output = self.output_dropout(output)
 
         return output
-    
+
     def rotate_for_position(self, x: torch.Tensor, sin: torch.Tensor, cos: torch.Tensor) -> torch.Tensor:
         """
         Rotate the input tensor using the precomputed sine and cosine values for RoPE.
@@ -145,19 +154,33 @@ class CausalMultiHeadSelfAttention(torch.nn.Module):
         :return: Rotated tensor of shape (B, T, E).
         """
 
-        B, T, E = x.shape
+        x = self._view_for_multiple_heads(x)  # B x H x T x E/H
+
+        B, H, T, D = x.shape
 
         # chunk x appropriately to apply sine scaling
-        reshaped_x = x.view(B, T, E // 2, 2)
+        reshaped_x = x.view(B, H, T, D // 2, 2)
         # flip the last dimension
         reshaped_x = reshaped_x[..., [1, 0]]
         # negate the first of each pair
         reshaped_x[..., 0] = -reshaped_x[..., 0]
         # flatten the last dimension
-        reshaped_x = reshaped_x.view(B, T, E)
-
+        reshaped_x = reshaped_x.view(B, H, T, D)
         # apply sine and cosine scaling
-        return x * cos + reshaped_x * sin
+        rotated = x * cos + reshaped_x * sin
+        # reshape back to original shape
+        rotated = rotated.transpose(1, 2).contiguous().view(B, T, H * D)  # B x T x E
+
+        return rotated
+    
+    def _view_for_multiple_heads(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Reshape the input tensor to separate out the heads.
+        :param x: Input tensor of shape (B, T, E)
+        :return: Reshaped tensor of shape (B, H, T, E/H)
+        """
+        B, T, _ = x.shape
+        return x.view(B, T, self.num_heads, self.head_size).transpose(1, 2) 
 
 
 class FeedForwardNetwork(torch.nn.Module):

@@ -104,7 +104,6 @@ def test_inference_transformer_blocks():
 
 # data provider for the prompt
 @pytest.mark.parametrize("prompt", ["Long live the", None])
-# @pytest.mark.parametrize("prompt", [None])
 @torch.no_grad()
 def test_inference_engine(prompt: Optional[str]):
     """
