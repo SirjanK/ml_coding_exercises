@@ -97,20 +97,48 @@ def test_inference_mhsa():
     context = engine.context
 
     # get the first mhsa
-    mhsa = model.transformer_blocks[0].mhsa
+    transformer_block = model.transformer_blocks[0]
+    mhsa = transformer_block.mhsa
 
     # get token embedding normally and pass through MHSA
     next_token = 5
     next_context = torch.cat((context, torch.tensor([[next_token]], dtype=torch.long)), dim=1)  # add a dummy token
     token_embeddings = model.get_token_embeddings(next_context)  # (1, T, E)
-    expected_output = mhsa(token_embeddings)[:, -1, :]  # (1, E) using the last token's output
+    expected_output = mhsa(transformer_block.layer_norm1(token_embeddings))[:, -1, :]  # (1, E) using the last token's output
 
     # run the inference engine
     curr_token_embedding = engine._compute_token_embedding(next_token)  # (1, 1, E)
-    inference_output = engine._inference_mhsa(curr_token_embedding, mhsa)  # (1, 1, E)
+    inference_output = engine._inference_mhsa(transformer_block.layer_norm1(curr_token_embedding), mhsa)  # (1, 1, E)
 
     # assert equivalence
     assert torch.allclose(expected_output, inference_output, atol=1e-5), f"MHSA output mismatch: {expected_output} vs {inference_output}"
+
+
+def test_inference_transformer_block():
+    """
+    Test the _inference_transformer_block function in the InferenceEngine class.
+    """
+    print(f"TEST INFERENCE TRANSFORMER BLOCK")
+
+    engine = setup_inference_engine("Long live the")
+    model = engine.model
+    context = engine.context
+
+    # get the first transformer block
+    transformer_block = model.transformer_blocks[0]
+
+    # get token embedding normally and pass through transformer block
+    next_token = 5
+    next_context = torch.cat((context, torch.tensor([[next_token]], dtype=torch.long)), dim=1)  # add a dummy token
+    token_embeddings = model.get_token_embeddings(next_context)  # (1, T, E)
+    expected_output = transformer_block(token_embeddings)[:, -1, :]  # (1, E) using the last token's output
+
+    # run the inference engine
+    curr_token_embedding = engine._compute_token_embedding(next_token)  # (1, 1, E)
+    inference_output = engine._inference_transformer_block(curr_token_embedding, transformer_block)  # (1, 1, E)
+
+    # assert equivalence
+    assert torch.allclose(expected_output, inference_output, atol=1e-5), f"Transformer block output mismatch: {expected_output} vs {inference_output}"
 
 
 # data provider for the prompt

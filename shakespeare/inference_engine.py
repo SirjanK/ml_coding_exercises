@@ -44,8 +44,9 @@ class InferenceEngine:
             # apply the model's embedding layer to the context along with positional encoding
             x = self.model.get_token_embeddings(self.context)
             # dictionary from transformer block to the cached key and value tensors for the current context
+            # we have to apply layer norm here as we always layer norm before the mhsa layer
             self.kv_cache = {
-                transformer_block.mhsa: self._compute_kv(x, transformer_block.mhsa)
+                transformer_block.mhsa: self._compute_kv(transformer_block.layer_norm1(x), transformer_block.mhsa)
                 for transformer_block in model.transformer_blocks
             }
     
