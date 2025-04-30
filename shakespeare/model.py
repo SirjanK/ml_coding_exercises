@@ -43,12 +43,15 @@ class CausalMultiHeadSelfAttention(torch.nn.Module):
         """
 
         # input shape: B x T x E
-        _, T, E = input.shape
+        _, T, _ = input.shape
 
-        # compute Q, K, V projections
-        full_qkv = self.qkv_proj(input)  # B x T x 3E
-        # slice to extract Q, K, V
-        q, k, v = full_qkv[..., :E], full_qkv[..., E:2 * E], full_qkv[..., 2 * E:]  # B x T x E for each
+        # rotate input for RoPE
+        rope_rotated_input = self.rotate_for_position(input, self.sin[:T, :], self.cos[:T, :])  # B x T x E
+
+        # compute Q, K, V projections - Q, K applied to rope, V to input
+        q = self.q_proj(rope_rotated_input)  # B x T x E
+        k = self.k_proj(rope_rotated_input)  # B x T x E
+        v = self.v_proj(input)  # B x T x E
 
         return self.mhsa_with_qkv(q, k, v, self.mask[:, :, :T, :T])  # B x T x E
     
@@ -56,8 +59,23 @@ class CausalMultiHeadSelfAttention(torch.nn.Module):
         """
         Construct the parameters for the masked self-attention module.
         """ 
-        # Q, K, V projection matrices for all heads (wrapped into a single projection matrix for efficiency)
-        self.qkv_proj = torch.nn.Linear(self.embedding_size, self.embedding_size * 3, bias=False)  # E x 3E
+        # cached RoPE tables for positional encodings
+        thetas = 10000 ** (-torch.arange(0, self.embedding_size, 2, dtype=torch.float32) / self.embedding_size)  # (E/2,)
+        # repeat thetas
+        thetas = torch.repeat_interleave(thetas, 2)  # (E,)
+        self.register_buffer("thetas", thetas)
+        # precompute sin and cosines for RoPE
+        expanded_thetas = thetas.unsqueeze(0).repeat(self.block_size, 1)  # (T, E)
+        scaled_thetas = torch.arange(self.block_size, dtype=torch.float32).unsqueeze(1) * expanded_thetas  # (T, E)
+        sin = torch.sin(scaled_thetas)  # (T, E)
+        cos = torch.cos(scaled_thetas)  # (T, E)
+        self.register_buffer("sin", sin)
+        self.register_buffer("cos", cos)
+
+        # Q, K, V projection matrices for all heads (wrapped into a single projection matrix for efficiency) (E, E) for each
+        self.q_proj = torch.nn.Linear(self.embedding_size, self.embedding_size, bias=False)
+        self.k_proj = torch.nn.Linear(self.embedding_size, self.embedding_size, bias=False)
+        self.v_proj = torch.nn.Linear(self.embedding_size, self.embedding_size, bias=False)
 
         # mask for the dot products before attention
         mask = torch.tril(torch.ones(self.block_size, self.block_size))  # T x T
@@ -116,6 +134,30 @@ class CausalMultiHeadSelfAttention(torch.nn.Module):
         output = self.output_dropout(output)
 
         return output
+    
+    def rotate_for_position(self, x: torch.Tensor, sin: torch.Tensor, cos: torch.Tensor) -> torch.Tensor:
+        """
+        Rotate the input tensor using the precomputed sine and cosine values for RoPE.
+
+        :param x: Input tensor of shape (B, T, E).
+        :param sin: Sine tensor of shape (T, E).
+        :param cos: Cosine tensor of shape (T, E).
+        :return: Rotated tensor of shape (B, T, E).
+        """
+
+        B, T, E = x.shape
+
+        # chunk x appropriately to apply sine scaling
+        reshaped_x = x.view(B, T, E // 2, 2)
+        # flip the last dimension
+        reshaped_x = reshaped_x[..., [1, 0]]
+        # negate the first of each pair
+        reshaped_x[..., 0] = -reshaped_x[..., 0]
+        # flatten the last dimension
+        reshaped_x = reshaped_x.view(B, T, E)
+
+        # apply sine and cosine scaling
+        return x * cos + reshaped_x * sin
 
 
 class FeedForwardNetwork(torch.nn.Module):
@@ -269,20 +311,7 @@ class ShakespeareGPT(torch.nn.Module):
         self.token_embedding_table = torch.nn.Embedding(
             num_embeddings=self.vocab_size,
             embedding_dim=self.embedding_size,
-        )
-
-        # cached RoPE tables for positional encodings
-        thetas = 10000 ** (-torch.arange(0, self.embedding_size, 2, dtype=torch.float32) / self.embedding_size)  # (E/2,)
-        # repeat thetas
-        thetas = torch.repeat_interleave(thetas, 2)  # (E,)
-        self.register_buffer("thetas", thetas)
-        # precompute sin and cosines for RoPE
-        expanded_thetas = thetas.unsqueeze(0).repeat(self.block_size, 1)  # (T, E)
-        scaled_thetas = torch.arange(self.block_size, dtype=torch.float32).unsqueeze(1) * expanded_thetas  # (T, E)
-        sin = torch.sin(scaled_thetas)  # (T, E)
-        cos = torch.cos(scaled_thetas)  # (T, E)
-        self.register_buffer("sin", sin)
-        self.register_buffer("cos", cos)
+        ) 
 
         # gather transformer blocks
         transformer_blocks = []
@@ -304,7 +333,7 @@ class ShakespeareGPT(torch.nn.Module):
     
     def get_token_embeddings(self, input: torch.Tensor) -> torch.Tensor:
         """
-        Get the token embeddings for the input tokens including positional encodings.
+        Get the token embeddings for the input tokens
 
         :param input: Input tensor of shape (B, T)
         :return: Token embeddings tensor of shape (B, T, E)
@@ -313,37 +342,4 @@ class ShakespeareGPT(torch.nn.Module):
         # gather token embeddings
         token_embeddings = self.token_embedding_table(input)  # B x T x E
 
-        _, T, _ = token_embeddings.shape
-
-        # rotate by positional encoding
-        token_embeddings = self.rotate_for_position(
-            x=token_embeddings,
-            sin=self.sin[:T, :],
-            cos=self.cos[:T, :],
-        )
-
-        return token_embeddings
-    
-    def rotate_for_position(self, x: torch.Tensor, sin: torch.Tensor, cos: torch.Tensor) -> torch.Tensor:
-        """
-        Rotate the input tensor using the precomputed sine and cosine values for RoPE.
-
-        :param x: Input tensor of shape (B, T, E).
-        :param sin: Sine tensor of shape (T, E).
-        :param cos: Cosine tensor of shape (T, E).
-        :return: Rotated tensor of shape (B, T, E).
-        """
-
-        B, T, E = x.shape
-
-        # chunk x appropriately to apply sine scaling
-        reshaped_x = x.view(B, T, E // 2, 2)
-        # flip the last dimension
-        reshaped_x = reshaped_x[..., [1, 0]]
-        # negate the first of each pair
-        reshaped_x[..., 0] = -reshaped_x[..., 0]
-        # flatten the last dimension
-        reshaped_x = reshaped_x.view(B, T, E)
-
-        # apply sine and cosine scaling
-        return x * cos + reshaped_x * sin
+        return token_embeddings 
