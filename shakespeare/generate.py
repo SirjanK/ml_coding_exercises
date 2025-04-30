@@ -55,7 +55,6 @@ def text_generator(tokenizer: Tokenizer, model: ShakespeareGPT, prompt: str, len
         yield tokenizer.decode_single(next_token)
 
         # update the context and next token idx
-        # add the new token to the context
         context = torch.cat((context, torch.tensor([[next_token]], dtype=torch.long)), dim=1) 
 
 

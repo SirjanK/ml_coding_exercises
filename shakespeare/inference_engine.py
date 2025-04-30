@@ -1,5 +1,5 @@
 import torch
-from model import ShakespeareGPT
+from shakespeare.model import ShakespeareGPT
 
 
 class InferenceEngine:
@@ -11,12 +11,26 @@ class InferenceEngine:
     that we then add to the context for the next inference call.
     """
 
-    def __init__(self, model: ShakespeareGPT):
+    def __init__(self, model: ShakespeareGPT, context: torch.Tensor):
         """
         Initialize the inference engine
 
         :param model: The trained ShakespeareGPT model to use for inference
+        :param context: Initial context for the model - usually the prompt[:-1] with the last token reserved for the inference call
         """
 
         self.model = model
         self.model.eval()
+
+        self.context = context
+    
+    @torch.no_grad()
+    def inference(self, next_token: int) -> torch.Tensor:
+        """
+        Run inference on the context appended with next_token. Prune context if needed.
+
+        :param next_token: The next token to append to the context for inference
+        :return: The model's output logits for the next token
+        """
+
+        return torch.rand(self.model.vocab_size)  # Placeholder for actual inference logic
