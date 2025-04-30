@@ -43,41 +43,14 @@ class CausalMultiHeadSelfAttention(torch.nn.Module):
         """
 
         # input shape: B x T x E
-        B, T, E = input.shape
+        E = input.shape[-1]
 
         # compute Q, K, V projections
         full_qkv = self.qkv_proj(input)  # B x T x 3E
         # slice to extract Q, K, V
         q, k, v = full_qkv[..., :E], full_qkv[..., E:2 * E], full_qkv[..., 2 * E:]  # B x T x E for each
 
-        # reshape to separate out the heads
-        q = q.view(B, T, self.num_heads, self.head_size).transpose(1, 2)  # B x H x T x E/H
-        k = k.view(B, T, self.num_heads, self.head_size).transpose(1, 2)  # B x H x T x E/H
-        v = v.view(B, T, self.num_heads, self.head_size).transpose(1, 2)  # B x H x T x E/H
-
-        # compute dot product
-        dot_product = q @ k.transpose(2, 3)  # B x H x T x T
-        # apply mask to the dot product
-        masked_dot_product = dot_product.masked_fill(self.mask[:, :, :T, :T] == 0, float("-inf"))  # B x H x T x T
-        # scale by head size
-        scaled_dot_product = masked_dot_product / (self.head_size ** 0.5)  # B x H x T x T
-    
-        # apply softmax to get attention weights
-        attention_weights = torch.nn.functional.softmax(scaled_dot_product, dim=-1)  # B x H x T x T
-        # apply dropout to attention weights
-        attention_weights = self.attention_dropout(attention_weights)  # B x H x T x T
-
-        # compute the attention output
-        attention_output = attention_weights @ v  # B x H x T x E/H
-
-        # concat the head outputs
-        attention_output = attention_output.transpose(1, 2).contiguous().view(B, T, E)  # B x T x E
-
-        # apply the output projection and dropout
-        output = self.output_proj(attention_output)  # B x T x E
-        output = self.output_dropout(output)
-
-        return output
+        return self.mhsa_with_qkv(q, k, v)  # B x T x E
     
     def _construct_parameters(self):
         """
@@ -99,6 +72,48 @@ class CausalMultiHeadSelfAttention(torch.nn.Module):
 
         # dropout for output projection
         self.output_dropout = torch.nn.Dropout(0.2)
+    
+    def mhsa_with_qkv(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        """
+        Compute the masked multi-head self-attention output using pre-computed Q, K, V.
+
+        :param q: Query tensor of shape (B, T_q, E)
+        :param k: Key tensor of shape (B, T_kv, E)
+        :param v: Value tensor of shape (B, T_kv, E)
+        :return: Output tensor of shape (B, T_q, E)
+        """
+
+        B, T_q, E = q.shape
+        T_kv = k.shape[1]
+
+        # reshape to separate out the heads
+        q = q.view(B, T_q, self.num_heads, self.head_size).transpose(1, 2)  # B x H x T_q x E/H
+        k = k.view(B, T_kv, self.num_heads, self.head_size).transpose(1, 2)  # B x H x T_kv x E/H
+        v = v.view(B, T_kv, self.num_heads, self.head_size).transpose(1, 2)  # B x H x T_kv x E/H
+
+        # compute dot product
+        dot_product = q @ k.transpose(2, 3)  # B x H x T_q x T_kv
+        # apply mask to the dot product
+        masked_dot_product = dot_product.masked_fill(self.mask[:, :, :T_q, :T_kv] == 0, float("-inf"))  # B x H x T_q x T_kv
+        # scale by head size
+        scaled_dot_product = masked_dot_product / (self.head_size ** 0.5)  # B x H x T_q x T_kv
+    
+        # apply softmax to get attention weights
+        attention_weights = torch.nn.functional.softmax(scaled_dot_product, dim=-1)  # B x H x T_q x T_kv
+        # apply dropout to attention weights
+        attention_weights = self.attention_dropout(attention_weights)  # B x H x T_q x T_kv
+
+        # compute the attention output
+        attention_output = attention_weights @ v  # B x H x T_q x E/H
+
+        # concat the head outputs
+        attention_output = attention_output.transpose(1, 2).contiguous().view(B, T_q, E)  # B x T_q x E
+
+        # apply the output projection and dropout
+        output = self.output_proj(attention_output)  # B x T_q x E
+        output = self.output_dropout(output)
+
+        return output
 
 
 class FeedForwardNetwork(torch.nn.Module):
@@ -215,17 +230,7 @@ class ShakespeareGPT(torch.nn.Module):
         """
 
         # gather token embeddings
-        token_embeddings = self.token_embedding_table(input)  # B x T x E
-
-        position_indices = torch.arange(self.block_size, device=input.device, dtype=torch.long)  # T
-        position_indices = position_indices.unsqueeze(0).expand(input.shape[0], -1)  # B x T
-
-        # gather positional embeddings
-        positional_embeddings = self.positional_embedding_table(position_indices)  # B x T x E
-
-        # add token and positional embeddings
-        _, T, _ = token_embeddings.shape
-        token_embeddings = token_embeddings + positional_embeddings[:, :T, :]  # B x T x E
+        token_embeddings = self.get_token_embeddings(input)  # B x T x E
 
         # apply transformer blocks
         for transformer_block in self.transformer_blocks:
@@ -284,3 +289,26 @@ class ShakespeareGPT(torch.nn.Module):
         self.token_prediction_proj = torch.nn.Sequential(
             torch.nn.Linear(self.embedding_size, self.vocab_size),
         )
+    
+    def get_token_embeddings(self, input: torch.Tensor) -> torch.Tensor:
+        """
+        Get the token embeddings for the input tokens including positional encodings.
+
+        :param input: Input tensor of shape (B, T)
+        :return: Token embeddings tensor of shape (B, T, E)
+        """
+
+        # gather token embeddings
+        token_embeddings = self.token_embedding_table(input)  # B x T x E
+
+        position_indices = torch.arange(self.block_size, device=input.device, dtype=torch.long)  # T
+        position_indices = position_indices.unsqueeze(0).expand(input.shape[0], -1)  # B x T
+
+        # gather positional embeddings
+        positional_embeddings = self.positional_embedding_table(position_indices)  # B x T x E
+
+        # add token and positional embeddings
+        _, T, _ = token_embeddings.shape
+        token_embeddings = token_embeddings + positional_embeddings[:, :T, :]  # B x T x E
+
+        return token_embeddings

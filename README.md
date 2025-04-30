@@ -52,5 +52,5 @@ Other options are `--topk-sampling-limit` for optional top-k sampling (defaults 
 From very barebones qualitative evaluation, we find this setting to work best for the `heavy` model:
 Top-K sampling with temperature with `K=10` and temperature `T=0.8`.
 
-We also implement KV caching and show that it speeds up inference by a factor of `?x` with the above setting. Particularly we go from
+We also implement KV caching (see `shakespeare/inference_engine.py`) and show that it speeds up inference by a factor of `?x` with the above setting. Particularly we go from
 `15.59 ms/token` to `?ms/token` with KV caching as measured in generating `1000` tokens.

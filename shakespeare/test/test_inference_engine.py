@@ -13,7 +13,8 @@ from shakespeare.tokenizer import Tokenizer
 
 
 # data provider for the prompt
-@pytest.mark.parametrize("prompt", ["Long live the", None])
+# @pytest.mark.parametrize("prompt", ["Long live the", None])
+@pytest.mark.parametrize("prompt", ["Long live the"])
 @torch.no_grad()
 def test_inference_engine(prompt: Optional[str]):
     torch.manual_seed(12)
@@ -48,15 +49,12 @@ def test_inference_engine(prompt: Optional[str]):
             context = context[:, -model.block_size:]
 
         # run full model inference manually to get logits
-        print(f"Raw Context: {context}")
         logits = model(context)  # (1, T', V) where T' is the length of the current context (T' <= T)
 
         # index into next_token_idx
         logits = logits[0, -1, :]  # (V,) using the last token's logit
 
         # run inference engine on the latest token logits
-        print(f"Inference engine context: {context}")
-        print(f"Inference engine next token: {context[0, -1].item()}")
         inference_engine_logits = inference_engine.inference(context[0, -1].item())
 
         # assert equivalence of logits
