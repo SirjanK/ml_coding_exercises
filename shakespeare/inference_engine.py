@@ -1,5 +1,4 @@
 import torch
-import torch.nn.functional as F
 from shakespeare.model import ShakespeareGPT, CausalMultiHeadSelfAttention, TransformerBlock
 from typing import Optional
 
@@ -26,30 +25,24 @@ class InferenceEngine:
 
         self.block_size = model.block_size
 
-        self.context = context
-        if self.context is not None and self.context.shape[1] > self.block_size - 1:
+        if context is not None and context.shape[1] > self.block_size - 1:
             # prune to get T-1 tokens
-            self.context = self.context[:, -self.block_size + 1:]
+            context = context[:, -self.block_size + 1:]
         
-        if self.context is None:
-            # if no context is provided, set it to an empty tensor of desired shape
-            self.context = torch.empty((1, 0), dtype=torch.long)
-
-            # also initialize the KV cache to empty tensors of desired shape
+        if context is None:
+            self.pos = 0  # next token will be in position 0
+            # initialize the KV cache to empty tensors of desired shape
             self.kv_cache = {
                 transformer_block.mhsa: torch.empty((1, 0, 2 * model.embedding_size), dtype=torch.float32)
                 for transformer_block in model.transformer_blocks
             }
         else:
-            # apply the model's embedding layer to the context along with positional encoding
-            x = self.model.get_token_embeddings(self.context)
+            self.pos = context.shape[1]  # next token will be in this starting position
+            x = self.model.get_token_embeddings(context)
             # dictionary from transformer block to the cached key and value tensors for the current context
-            # we have to apply layer norm here as we always layer norm before the mhsa layer
-            self.kv_cache = {
-                transformer_block.mhsa: self._compute_kv(transformer_block.layer_norm1(x), transformer_block.mhsa)
-                for transformer_block in model.transformer_blocks
-            }
-    
+            self.kv_cache = dict()
+            self._construct_init_kv_cache(x)    
+
     @torch.no_grad()
     def inference(self, next_token: int) -> torch.Tensor:
         """
@@ -68,38 +61,37 @@ class InferenceEngine:
         # pass through final projection layer
         x = torch.squeeze(self.model.token_prediction_proj(x), dim=0)  # 1 x V
 
+        self.pos = min(self.pos + 1, self.block_size - 1)  # increment position (max is block_size - 1)
+
         return x
     
-    def _compute_kv(self, x: torch.Tensor, mhsa: CausalMultiHeadSelfAttention) -> torch.Tensor:
+    def _construct_init_kv_cache(self, x: torch.Tensor) -> None:
         """
-        Compute the key and value tensors for the multi-head self-attention layer on the current context.
+        Construct initial KV cache for the transformer blocks using the initial context.
 
-        :param x: The input tensor to the multi-head self-attention layer, shape B x T x E
-        :param mhsa: The multi-head self-attention layer
-        :return: tensor of shape B x T' x 2E where T' is the current length of the context (guaranteed to be <= T - 1). The first of E dims
-        refers to the keys, second to the values
+        :param x: token embeddings for initial context shape (1, T, E)
         """
 
-        E = x.shape[-1]
-
-        # get the linear projection matrix for K, V - we have no bias here
-        weight_kv = mhsa.qkv_proj.weight[E:, :]
-
-        kv_proj = F.linear(x, weight_kv)  # B x T x 2E
-
-        return kv_proj
+        # we undergo a forward pass through the transformer blocks, extracting the KV cache each time
+        for transformer_block in self.model.transformer_blocks:
+            x_tmp = transformer_block.layer_norm1(x)  # apply layer norm
+            qkv = transformer_block.mhsa.qkv_proj(x_tmp)  # 1 x T x 3E
+            extracted_kv = qkv[:, :, self.model.embedding_size:]  # 1 x T x 2E
+            self.kv_cache[transformer_block.mhsa] = extracted_kv  # store extracted KV in cache
+            # apply the full transformer block to x
+            x = transformer_block(x)
     
     def _compute_token_embedding(self, token: int) -> torch.Tensor:
         """
         Compute the token embedding for a given token.
 
         :param token: The token to compute the embedding for
+        :param pos: position for the token
         :return: The token embedding, shape 1 x 1 x E
         """
 
-        # get current context length as a tensor
-        curr_context_length = self.context.shape[1]
-        position = torch.tensor([curr_context_length], dtype=torch.long).unsqueeze(0)  # 1 x 1
+        # get pos as a tensor
+        position = torch.tensor([self.pos], dtype=torch.long).unsqueeze(0)  # 1 x 1
 
         # get token embedding
         x = torch.tensor(token, dtype=torch.long).unsqueeze(0)  # 1 x 1
@@ -153,5 +145,5 @@ class InferenceEngine:
         # update the cache (if it is full, prune the first token)
         if self.kv_cache[mhsa].shape[1] >= self.block_size:
             self.kv_cache[mhsa] = self.kv_cache[mhsa][:, -self.block_size + 1:, :]
-        
+         
         return x

@@ -1,7 +1,7 @@
 import torch
 import os
 import pytest
-from typing import Optional
+from typing import Optional, Tuple
 from shakespeare.inference_engine import InferenceEngine
 from shakespeare.model import ShakespeareGPT
 from shakespeare.train import load_vocab, get_config, MODEL_PATH
@@ -12,9 +12,11 @@ from shakespeare.tokenizer import Tokenizer
 # fix the manual seed for fair comparison
 
 
-def setup_inference_engine(prompt: Optional[str] = None) -> InferenceEngine:
+def setup_inference_engine(prompt: Optional[str] = None) -> Tuple[torch.Tensor, InferenceEngine]:
     """
     Setup the inference engine with the given prompt.
+
+    :return: Tuple of the encoded context and the inference engine
     """
 
     config = get_config('lite')
@@ -40,48 +42,21 @@ def setup_inference_engine(prompt: Optional[str] = None) -> InferenceEngine:
     else:
         inference_engine = InferenceEngine(model, context=context[:, :-1])  # reserve the last token for inference
     
-    return inference_engine
-
-
-def test_compute_kv():
-    """
-    Test for the _compute_kv function in the InferenceEngine class.
-    """
-
-    engine = setup_inference_engine("Long live the")
-    model = engine.model
-    context = engine.context
-
-    token_embeddings = model.get_token_embeddings(context)
-
-    # get first mhsa
-    mhsa = model.transformer_blocks[0].mhsa
-
-    # run full QKV inference manually, extract out K, V matrices
-    qkv = mhsa.qkv_proj(token_embeddings)
-    extracted_kv = qkv[:, :, model.embedding_size:]  # (1, T, 2 * E) where T is the length of the context
-
-    # run _compute_kv from inference engine
-    inference_kv = engine._compute_kv(token_embeddings, mhsa)
-
-    # assert equivalence
-    assert torch.allclose(extracted_kv, inference_kv, atol=1e-5), f"KV mismatch: {extracted_kv} vs {inference_kv}"
+    return context, inference_engine
 
 
 def test_compute_token_embedding():
     """
     Test the _compute_token_embedding function in the InferenceEngine class.
     """
-    engine = setup_inference_engine("Long live the")
+    context, engine = setup_inference_engine("Long live the")
     model = engine.model
-    context = engine.context
 
     # get the token embedding normally for the context plus a next token
-    next_token = 5 
-    next_context = torch.cat((context, torch.tensor([[next_token]], dtype=torch.long)), dim=1)  # add a dummy token
-    expected_token_embeddings = model.get_token_embeddings(next_context)[:, -1, :]
+    expected_token_embeddings = model.get_token_embeddings(context)[:, -1, :]
 
     # run the _compute_token_embedding function
+    next_token = context[0, -1].item()
     token_embedding = engine._compute_token_embedding(next_token)[:, 0, :]
 
     # assert equivalence
@@ -92,21 +67,19 @@ def test_inference_mhsa():
     """
     Test the _inference_mhsa function in the InferenceEngine class.
     """
-    engine = setup_inference_engine("Long live the")
+    context, engine = setup_inference_engine("Long live the")
     model = engine.model
-    context = engine.context
 
     # get the first mhsa
     transformer_block = model.transformer_blocks[0]
     mhsa = transformer_block.mhsa
 
     # get token embedding normally and pass through MHSA
-    next_token = 5
-    next_context = torch.cat((context, torch.tensor([[next_token]], dtype=torch.long)), dim=1)  # add a dummy token
-    token_embeddings = model.get_token_embeddings(next_context)  # (1, T, E)
+    token_embeddings = model.get_token_embeddings(context)  # (1, T, E)
     expected_output = mhsa(transformer_block.layer_norm1(token_embeddings))[:, -1, :]  # (1, E) using the last token's output
 
     # run the inference engine
+    next_token = context[0, -1].item()
     curr_token_embedding = engine._compute_token_embedding(next_token)  # (1, 1, E)
     inference_output = engine._inference_mhsa(transformer_block.layer_norm1(curr_token_embedding), mhsa)  # (1, 1, E)
 
@@ -118,35 +91,33 @@ def test_inference_transformer_blocks():
     """
     Test the _inference_transformer_block function in the InferenceEngine class.
     """
-    engine = setup_inference_engine("Long live the")
+    context, engine = setup_inference_engine("Long live the")
     model = engine.model
-    context = engine.context
 
     # get the first transformer block
     transformer_block = model.transformer_blocks[0]
 
     # get token embedding normally and pass through transformer block
-    next_token = 5
-    next_context = torch.cat((context, torch.tensor([[next_token]], dtype=torch.long)), dim=1)  # add a dummy token
-    token_embeddings = model.get_token_embeddings(next_context)  # (1, T, E)
+    token_embeddings = model.get_token_embeddings(context)  # (1, T, E)
     expected_output = transformer_block(token_embeddings)
 
     # run the inference engine
+    next_token = context[0, -1].item()
     curr_token_embedding = engine._compute_token_embedding(next_token)  # (1, 1, E)
     inference_output = engine._inference_transformer_block(curr_token_embedding, transformer_block)  # (1, 1, E)
 
     # assert equivalence
     assert torch.allclose(expected_output[:, -1, :], inference_output, atol=1e-5), f"Transformer block output mismatch: {expected_output[:, -1, :]} vs {inference_output}"
 
-    # do the same for the next block
+    # try for the next transformer block
     transformer_block = model.transformer_blocks[1]
-    token_embeddings = model.get_token_embeddings(next_context)  # (1, T, E)
-    expected_output = transformer_block(token_embeddings)  # (1, T, E)
 
-    curr_token_embedding = engine._compute_token_embedding(next_token)  # (1, 1, E)
-    inference_output = engine._inference_transformer_block(curr_token_embedding, transformer_block)  # (1, 1, E)
+    expected_output = transformer_block(expected_output)
 
-    assert torch.allclose(expected_output[:, -1, :], inference_output, atol=1e-5), f"Transformer block #2 output mismatch: {expected_output[:, -1, :]} vs {inference_output}"
+    inference_output = engine._inference_transformer_block(inference_output, transformer_block)
+
+    # assert equivalence
+    assert torch.allclose(expected_output[:, -1, :], inference_output, atol=1e-5), f"Transformer #2 block output mismatch: {expected_output[:, -1, :]} vs {inference_output}"
 
 
 # data provider for the prompt
@@ -158,13 +129,8 @@ def test_inference_engine(prompt: Optional[str]):
     """
     torch.manual_seed(12)
 
-    engine = setup_inference_engine(prompt=prompt)
+    context, engine = setup_inference_engine(prompt=prompt)
     model = engine.model
-
-    context = prompt if prompt is not None else " "
-    vocab = load_vocab("shakespeare/data")
-    tokenizer = Tokenizer(vocab)
-    context = torch.tensor(tokenizer.encode(context), dtype=torch.long).unsqueeze(0)  # batch size 1
 
     LENGTH = 2
     for _ in range(LENGTH):
