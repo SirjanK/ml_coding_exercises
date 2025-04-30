@@ -54,3 +54,9 @@ Top-K sampling with temperature with `K=10` and temperature `T=0.8`.
 
 We also implement KV caching (see `shakespeare/inference_engine.py`) and show that it speeds up inference by a factor of `?x` with the above setting. Particularly we go from
 `15.59 ms/token` to `?ms/token` with KV caching as measured in generating `1000` tokens.
+
+One learning while doing this: unless there's a strategy I'm missing, KV caching runs into issues once you hit the max sequence length if using absolute positional encodings (inc learned).
+I initially trained models with learned absolute encodigns (simple matrix $\Pi\in \mathbb{R}^{T, E}$ where `T` is seq length, `E` is embedding size), but once your KV cache hits `T` entries,
+you have to start pruning (LRU). But, then the positions get shifted invalidating the cache every element.
+
+Therefore, I switched to relative positional encodings (RoPE) which allows for the pruning. I didn't see any performance difference wrt validation loss, but we get to realize the speedup this way.
