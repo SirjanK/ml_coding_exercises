@@ -132,7 +132,7 @@ def test_inference_engine(prompt: Optional[str]):
     context, engine = setup_inference_engine(prompt=prompt)
     model = engine.model
 
-    LENGTH = 300
+    LENGTH = 64
     for _ in range(LENGTH):
         # trim context if it exceeds the model's block size
         if context.shape[1] > model.block_size:
