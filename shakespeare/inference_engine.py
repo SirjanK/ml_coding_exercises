@@ -90,7 +90,7 @@ class InferenceEngine:
         """
 
         # get token embedding
-        x = torch.tensor(token, dtype=torch.long).unsqueeze(0)  # 1 x 1
+        x = torch.tensor([token], dtype=torch.long).unsqueeze(0)  # 1 x 1
         x = self.model.token_embedding_table(x)  # 1 x 1 x E
 
         # rotate the token embedding
