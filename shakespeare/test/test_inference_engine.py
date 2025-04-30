@@ -29,7 +29,9 @@ def setup_inference_engine(prompt: Optional[str] = None) -> Tuple[torch.Tensor, 
         num_layers=config.num_layers,
         num_heads=config.num_heads,
     )
-    model.load_state_dict(torch.load(os.path.join(MODEL_PATH, "lite/best_model.pth")))
+    # TODO(sirjan) update path again
+    # model.load_state_dict(torch.load(os.path.join(MODEL_PATH, "lite/best_model.pth")))
+    model.load_state_dict(torch.load(os.path.join(MODEL_PATH, "best_model.pth")))
     model.eval()
 
     # initial context
@@ -43,28 +45,6 @@ def setup_inference_engine(prompt: Optional[str] = None) -> Tuple[torch.Tensor, 
         inference_engine = InferenceEngine(model, context=context[:, :-1])  # reserve the last token for inference
     
     return context, inference_engine
-
-
-def test_compute_token_embedding():
-    """
-    Test the _compute_token_embedding function in the InferenceEngine class.
-
-    NOTE: this holds when we have <= block_size. It fails when we have the context be greater than this since
-    the position is now disconnected. HOWEVER, the resulting dot products should be the same as that relies on the 
-    delta between the two embeddings. This is tested in the test_inference_engine function.
-    """
-    context, engine = setup_inference_engine("Long live the")
-    model = engine.model
-
-    # get the token embedding normally for the context plus a next token
-    expected_token_embeddings = model.get_token_embeddings(context)[:, -1, :]
-
-    # run the _compute_token_embedding function
-    next_token = context[0, -1].item()
-    token_embedding = engine._compute_token_embedding(next_token)[:, 0, :]
-
-    # assert equivalence
-    assert torch.allclose(expected_token_embeddings, token_embedding, atol=1e-5), f"Token embedding mismatch: {expected_token_embeddings} vs {token_embedding}"
 
 
 def test_inference_mhsa():
@@ -115,9 +95,7 @@ def test_inference_transformer_blocks():
 
     # try for the next transformer block
     transformer_block = model.transformer_blocks[1]
-
     expected_output = transformer_block(expected_output)
-
     inference_output = engine._inference_transformer_block(inference_output, transformer_block)
 
     # assert equivalence
@@ -125,8 +103,8 @@ def test_inference_transformer_blocks():
 
 
 # data provider for the prompt
-# @pytest.mark.parametrize("prompt", ["Long live the", None])
-@pytest.mark.parametrize("prompt", [None])
+@pytest.mark.parametrize("prompt", ["Long live the", None])
+# @pytest.mark.parametrize("prompt", [None])
 @torch.no_grad()
 def test_inference_engine(prompt: Optional[str]):
     """
@@ -142,18 +120,6 @@ def test_inference_engine(prompt: Optional[str]):
         # trim context if it exceeds the model's block size
         if context.shape[1] > model.block_size:
             context = context[:, -model.block_size:]
-
-        # if i == 32:
-        #     print(f"GETTING TO HERE")
-        #     # get the token embedding normally for the context plus a next token
-        #     expected_token_embeddings = model.get_token_embeddings(context)[:, -1, :]
-
-        #     # run the _compute_token_embedding function
-        #     next_token = context[0, -1].item()
-        #     token_embedding = engine._compute_token_embedding(next_token)[:, 0, :]
-
-        #     # assert equivalence
-        #     assert torch.allclose(expected_token_embeddings, token_embedding, atol=1e-5), f"Token embedding mismatch: {expected_token_embeddings} vs {token_embedding}"
 
         # run full model inference manually to get logits
         logits = model(context)  # (1, T', V) where T' is the length of the current context (T' <= T)

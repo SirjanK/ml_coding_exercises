@@ -3,6 +3,59 @@ from shakespeare.model import ShakespeareGPT, CausalMultiHeadSelfAttention, Tran
 from typing import Optional
 
 
+class KVCache:
+    """
+    A simple KV cache for transformer blocks in the ShakespeareGPT model.
+
+    We store the key and value tensors along with the length of these. We define a max length that is the limit for the size of this cache.
+    """
+
+    def __init__(self, max_length: int, embedding_size: int, init_k: Optional[torch.Tensor] = None, init_v: Optional[torch.Tensor] = None):
+        """
+        Initialize the KV cache.
+
+        :param max_length: The maximum length of the KV cache
+        :param init_k: Optional initial key tensor of shape (1, K, E)
+        :param init_v: Optional initial value tensor of shape (1, K, E)
+        """
+        assert max_length > 0, "max_length must be greater than 0"
+        assert not ((init_k is None) ^ (init_v is None)), "Either both init_k and init_v should be None or both should be provided"
+        if init_k is not None:
+            assert init_k.shape == init_v.shape, "init_k and init_v must have the same shape"
+            assert init_k.shape[0] == 1, "init_k and init_v must have batch size 1"
+            assert init_k.shape[2] == embedding_size, "init_k and init_v must have embedding size E"
+            assert init_k.shape[1] <= max_length, "init_k and init_v must have length less than or equal to max_length"
+        self.max_length = max_length
+        # dictionary from transformer block to a tuple of the cached key and value tensors (initially empty)
+        self.k = init_k if init_k is not None else torch.empty((1, 0, embedding_size), dtype=torch.float32)
+        self.v = init_v if init_v is not None else torch.empty((1, 0, embedding_size), dtype=torch.float32)
+    
+    def __len__(self) -> int:
+        """
+        Get the current length of the KV cache.
+
+        :return: The current length of the KV cache
+        """
+        return self.k.shape[1]
+    
+    def add(self, k: torch.Tensor, v: torch.Tensor) -> None:
+        """
+        Add a new key and value tensor to the KV cache.
+
+        :param k: The key tensor to add of shape (1, 1, E)
+        :param v: The value tensor to add of shape (1, 1, E)
+        """
+        # check if the cache is full
+        if len(self) >= self.max_length:
+            # prune the first token
+            self.k = self.k[:, -self.max_length + 1:, :]
+            self.v = self.v[:, -self.max_length + 1:, :]
+
+        # concat K, V to the cache
+        self.k = torch.cat((self.k, k), dim=1)
+        self.v = torch.cat((self.v, v), dim=1)
+
+
 class InferenceEngine:
     """
     This custom inference engine supports efficient rolling next token inference for the ShakespeareGPT model
@@ -32,15 +85,15 @@ class InferenceEngine:
         if context is None:
             self.pos = 0  # next token will be in position 0
             # initialize the KV cache to empty tensors of desired shape
-            self.kv_cache = {
-                transformer_block.mhsa: torch.empty((1, 0, 2 * model.embedding_size), dtype=torch.float32)
+            self.kv_caches = {
+                transformer_block.mhsa: KVCache(max_length=self.block_size, embedding_size=model.embedding_size)
                 for transformer_block in model.transformer_blocks
             }
         else:
             self.pos = context.shape[1]  # next token will be in this starting position
             x = self.model.get_token_embeddings(context)
             # dictionary from transformer block to the cached key and value tensors for the current context
-            self.kv_cache = dict()
+            self.kv_caches = dict()
             self._construct_init_kv_cache(x)    
 
     @torch.no_grad()
@@ -72,12 +125,17 @@ class InferenceEngine:
         :param x: token embeddings for initial context shape (1, T, E)
         """
 
+        _, T, E = x.shape
+
         # we undergo a forward pass through the transformer blocks, extracting the KV cache each time
         for transformer_block in self.model.transformer_blocks:
             x_tmp = transformer_block.layer_norm1(x)  # apply layer norm
-            qkv = transformer_block.mhsa.qkv_proj(x_tmp)  # 1 x T x 3E
-            extracted_kv = qkv[:, :, self.model.embedding_size:]  # 1 x T x 2E
-            self.kv_cache[transformer_block.mhsa] = extracted_kv  # store extracted KV in cache
+            # get rotated version of x_tmp
+            rotated_x = transformer_block.mhsa.rotate_for_position(x_tmp, sin=transformer_block.mhsa.sin[:T, :], cos=transformer_block.mhsa.cos[:T, :])
+            k = transformer_block.mhsa.k_proj(rotated_x)  # 1 x T x E
+            v = transformer_block.mhsa.v_proj(x_tmp)  # 1 x T x E
+            # concat K, V to the cache
+            self.kv_caches[transformer_block.mhsa] = KVCache(max_length=self.block_size, embedding_size=E, init_k=k, init_v=v)
             # apply the full transformer block to x
             x = transformer_block(x)
     
@@ -91,16 +149,7 @@ class InferenceEngine:
 
         # get token embedding
         x = torch.tensor([token], dtype=torch.long).unsqueeze(0)  # 1 x 1
-        x = self.model.token_embedding_table(x)  # 1 x 1 x E
-
-        # rotate the token embedding
-        # scale theta by the current position
-        scaled_thetas = self.pos * self.model.thetas  # E
-        x = self.model.rotate_for_position(
-            x,
-            sin=torch.sin(scaled_thetas).unsqueeze(0),
-            cos=torch.cos(scaled_thetas).unsqueeze(0),
-        )  # 1 x 1 x E
+        x = self.model.get_token_embeddings(x)  # 1 x 1 x E
 
         return x
 
@@ -129,25 +178,34 @@ class InferenceEngine:
 
         E = x.shape[-1]
 
-        # get QKV for the current input
-        curr_qkv = mhsa.qkv_proj(x)  # 1 x 1 x 3E
+        # get rotated version of x
+        scaled_thetas = mhsa.thetas * self.pos
+        sin = torch.sin(scaled_thetas)
+        cos = torch.cos(scaled_thetas)
+        rotated_x = mhsa.rotate_for_position(
+            x,
+            sin=sin.unsqueeze(0),
+            cos=cos.unsqueeze(0),
+        )
 
-        # split into Q, KV
-        curr_q, curr_kv = curr_qkv[:, :, :E], curr_qkv[:, :, E:]  # 1 x 1 x E for q, 1 x 1 x 2E for kv 
+        # compute Q, K using rotated x
+        curr_q = mhsa.q_proj(rotated_x)  # 1 x 1 x E
+        curr_k = mhsa.k_proj(rotated_x)  # 1 x 1 x E
+        # compute V using the original x
+        curr_v = mhsa.v_proj(x)
 
         # concat k, v to the cache
-        self.kv_cache[mhsa] = torch.cat((self.kv_cache[mhsa], curr_kv), dim=1)
-
-        # split out K, V
-        k, v = self.kv_cache[mhsa][:, :, :E], self.kv_cache[mhsa][:, :, E:]
+        cache = self.kv_caches[mhsa]
+        cache.add(curr_k, curr_v)
 
         # run inference
-        T_kv = self.kv_cache[mhsa].shape[1]
+        T_kv = len(cache)
         mask = torch.ones(1, 1, 1, T_kv, dtype=torch.bool)  # attend to every position (T_q = 1)
-        x = mhsa.mhsa_with_qkv(curr_q, k, v, dot_product_mask=mask)
+        x = mhsa.mhsa_with_qkv(
+            q=curr_q,
+            k=cache.k,
+            v=cache.v,
+            dot_product_mask=mask,
+        )
 
-        # update the cache (if it is full, prune the first token)
-        if self.kv_cache[mhsa].shape[1] >= self.block_size:
-            self.kv_cache[mhsa] = self.kv_cache[mhsa][:, -self.block_size + 1:, :]
-         
         return x
