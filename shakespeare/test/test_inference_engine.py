@@ -31,9 +31,7 @@ def setup_inference_engine(prompt: Optional[str] = None) -> Tuple[torch.Tensor, 
         num_layers=config.num_layers,
         num_heads=config.num_heads,
     )
-    # TODO(sirjan) update path again
-    # model.load_state_dict(torch.load(os.path.join(MODEL_PATH, "lite/best_model.pth")))
-    model.load_state_dict(torch.load(os.path.join(MODEL_PATH, "best_model.pth")))
+    model.load_state_dict(torch.load(os.path.join(MODEL_PATH, "lite/best_model.pth")))
     model.eval()
 
     # initial context
