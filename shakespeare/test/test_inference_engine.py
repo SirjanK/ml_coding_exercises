@@ -8,8 +8,10 @@ from shakespeare.train import load_vocab, get_config, MODEL_PATH
 from shakespeare.tokenizer import Tokenizer
 
 
-# test the inference engine by sampling 100 tokens using full inference and the inference engine
+# test the inference engine by sampling 15 tokens using full inference and the inference engine
 # fix the manual seed for fair comparison
+# we don't expect exact equivalence once we hit the max token length due to pruning, but until then, exact equality
+# is expected
 
 
 def setup_inference_engine(prompt: Optional[str] = None) -> Tuple[torch.Tensor, InferenceEngine]:
@@ -114,7 +116,7 @@ def test_inference_engine(prompt: Optional[str]):
     context, engine = setup_inference_engine(prompt=prompt)
     model = engine.model
 
-    LENGTH = 100
+    LENGTH = 15
     for i in range(LENGTH): 
         # trim context if it exceeds the model's block size
         if context.shape[1] > model.block_size:

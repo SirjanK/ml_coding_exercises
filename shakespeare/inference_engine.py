@@ -187,18 +187,19 @@ class InferenceEngine:
 
         # rotate q, k
         scaled_thetas = mhsa.thetas * self.pos
-        sin = torch.sin(scaled_thetas)
-        cos = torch.cos(scaled_thetas)
+        # (1, E) for each
+        sin = torch.sin(scaled_thetas).unsqueeze(0)
+        cos = torch.cos(scaled_thetas).unsqueeze(0)
 
         curr_q = mhsa.rotate_for_position(
             curr_q,
-            sin=sin.unsqueeze(0),
-            cos=cos.unsqueeze(0),
+            sin=sin,
+            cos=cos,
         )
         curr_k = mhsa.rotate_for_position(
             curr_k,
-            sin=sin.unsqueeze(0),
-            cos=cos.unsqueeze(0),
+            sin=sin,
+            cos=cos,
         )
 
         # concat k, v to the cache
